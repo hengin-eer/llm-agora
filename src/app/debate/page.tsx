@@ -1,6 +1,7 @@
 "use client";
 
 import Message, { type ChatMessageProps } from "./Message";
+import TextArea from "./Textarea";
 
 function DebatePage() {
   const chatMessages: ChatMessageProps[] = [
@@ -58,6 +59,9 @@ function DebatePage() {
               name={msg.name}
             />
           ))}
+        </section>
+        <section className="fixed w-full bottom-0 left-0 bg-white px-4 py-5 border-t">
+          <TextArea />
         </section>
       </main>
 		</div>
