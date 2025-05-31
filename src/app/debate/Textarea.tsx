@@ -1,13 +1,15 @@
 "use client";
 import { useRef, useState } from "react";
+import type { ChatMessageProps } from "./Message";
 
-/**
- * 送信ボタン付きのテキストエリア
- * 改行時に自動で拡張される
- */
-function TextArea() {
+type TextAreaProps = {
+	setChatMessages: (chatMessage: ChatMessageProps[]) => void;
+};
+
+function TextArea({ setChatMessages }: TextAreaProps) {
 	const hiddenInput = useRef<HTMLDivElement>(null);
 	const [value, setValue] = useState("");
+	const userName = "明石太郎";
 
 	return (
 		<div className="box-border flex items-end gap-2 w-full">
@@ -31,6 +33,20 @@ function TextArea() {
 			<button
 				className="w-max px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
 				type="submit"
+				onClick={() => {
+					if (value.trim() === "") return;
+					const pad = (n: number) => n.toString().padStart(2, "0");
+					const now = new Date();
+					const newMessage: ChatMessageProps = {
+						id: `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`,
+						message: value,
+						role: "user",
+						name: userName,
+					};
+          // TODO: 型の不一致を解消する。なんでやろ...
+					setChatMessages((prevMessages: ChatMessageProps[]) => [...prevMessages, newMessage]);
+					setValue("");
+				}}
 			>
 				送信
 			</button>
