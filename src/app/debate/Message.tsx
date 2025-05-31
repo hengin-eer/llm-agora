@@ -23,10 +23,18 @@ function Message({ id, message, role, name }: ChatMessageProps) {
 			</div>
 			{/* メッセージ領域 */}
 			<div
-				className={`flex flex-col gap-1 ${role === "user" ? "items-end" : "items-start"}`}
+				className={`max-w-2/3 flex flex-col ${role === "user" ? "items-end" : "items-start"}`}
 			>
-				<p className="text-sm pb-1">{name}</p>
-				<p className="p-3 bg-slate-100 text-sm text-gray-700">{message}</p>
+				<p className="text-sm text-slate-600 pb-2">{name}</p>
+				<p
+					className={`p-3 bg-blue-50 text-sm text-slate-900 rounded-xl
+            ${role === "user" ? "rounded-tr-none" : "rounded-tl-none"}`}
+				>
+					{message}
+				</p>
+				<p className="text-xs text-slate-400 mt-1">
+					{`${id.slice(0, 4)}年${id.slice(4, 6)}月${id.slice(6, 8)}日 ${id.slice(8, 10)}:${id.slice(10, 12)}:${id.slice(12, 14)}`}
+				</p>
 			</div>
 		</article>
 	);
