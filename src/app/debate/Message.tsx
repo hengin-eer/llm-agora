@@ -1,16 +1,13 @@
 "use client";
 
-export type ChatMessageProps = {
-	id: string;
-	message: string;
-	role: "user" | "llm";
-	name: string;
-};
+import type { UIMessage } from "ai";
 
-function Message({ id, message, role, name }: ChatMessageProps) {
+function Message({ id, role, createdAt, content, parts }: UIMessage) {
+	const name = role === "user" ? "明石太郎" : "AIアシスタント";
+
 	return (
 		<article
-			key={id}
+			id={id}
 			className={`flex items-start gap-3 p-2
         ${role === "user" && "flex-row-reverse"}`}
 		>
@@ -27,13 +24,15 @@ function Message({ id, message, role, name }: ChatMessageProps) {
 			>
 				<p className="text-sm text-slate-600 pb-2">{name}</p>
 				<p
-					className={`p-3 bg-blue-50 text-sm text-slate-900 rounded-xl
+					className={`p-3 bg-blue-50 text-sm text-slate-900 rounded-xl whitespace-pre-line
             ${role === "user" ? "rounded-tr-none" : "rounded-tl-none"}`}
 				>
-					{message}
+					{content}
 				</p>
 				<p className="text-xs text-slate-400 mt-1">
-					{`${id.slice(0, 4)}年${id.slice(4, 6)}月${id.slice(6, 8)}日 ${id.slice(8, 10)}:${id.slice(10, 12)}:${id.slice(12, 14)}`}
+					{createdAt instanceof Date
+						? `${createdAt.getFullYear()}年${String(createdAt.getMonth() + 1).padStart(2, "0")}月${String(createdAt.getDate()).padStart(2, "0")}日 ${String(createdAt.getHours()).padStart(2, "0")}:${String(createdAt.getMinutes()).padStart(2, "0")}:${String(createdAt.getSeconds()).padStart(2, "0")}`
+						: ""}
 				</p>
 			</div>
 		</article>

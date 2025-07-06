@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import Message, { type ChatMessageProps } from "./Message";
+import Message from "./Message";
 import TextArea from "./Textarea";
+import { useChat } from "@ai-sdk/react";
 
 function DebatePage() {
-	const damyChatMessages: ChatMessageProps[] = [
+	const damyChatMessages = [
 		{
 			id: "20240601120001",
 			message: "こんにちは、今日はAIの役割について肯定的な立場から議論します。",
@@ -47,8 +47,7 @@ function DebatePage() {
 		},
 	];
 
-	const [chatMessages, setChatMessages] =
-		useState<ChatMessageProps[]>(damyChatMessages);
+	const { messages, input, handleInputChange, handleSubmit } = useChat();
 
 	return (
 		<div>
@@ -57,18 +56,19 @@ function DebatePage() {
 			</header>
 			<main className="p-4 mb-[120px]">
 				<section className="flex flex-col gap-4">
-					{chatMessages.map((msg) => (
+					{messages.map((msg) => (
 						<Message
 							key={msg.id}
 							id={msg.id}
-							message={msg.message}
 							role={msg.role}
-							name={msg.name}
+							createdAt={msg.createdAt}
+							content={msg.content}
+							parts={msg.parts}
 						/>
 					))}
 				</section>
 				<section className="fixed w-full bottom-0 left-0 bg-white px-4 py-5 border-t">
-					<TextArea setChatMessages={setChatMessages} />
+					<TextArea input={input} handleSubmit={handleSubmit} handleInputChange={handleInputChange} />
 				</section>
 			</main>
 		</div>
