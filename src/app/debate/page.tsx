@@ -1,8 +1,8 @@
 "use client";
 
+import { useChat } from "@ai-sdk/react";
 import Message from "./Message";
 import TextArea from "./Textarea";
-import { useChat } from "@ai-sdk/react";
 
 function DebatePage() {
 	const { messages, input, handleInputChange, handleSubmit } = useChat();
@@ -26,7 +26,11 @@ function DebatePage() {
 					))}
 				</section>
 				<section className="fixed w-full bottom-0 left-0 bg-white px-4 py-5 border-t">
-					<TextArea input={input} handleSubmit={handleSubmit} handleInputChange={handleInputChange} />
+					<TextArea
+						input={input}
+						handleSubmit={handleSubmit}
+						handleInputChange={handleInputChange}
+					/>
 				</section>
 			</main>
 		</div>
