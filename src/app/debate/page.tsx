@@ -1,11 +1,65 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import Message from "./Message";
+import type { Message } from "ai";
+import { useCallback, useRef, useState } from "react";
+import MessageComponent from "./Message";
 import TextArea from "./Textarea";
 
 function DebatePage() {
-	const { messages, input, handleInputChange, handleSubmit } = useChat();
+	const [isDebating, setIsDebating] = useState(false);
+	const [turnNumber, setTurnNumber] = useState(0);
+	const isDebatingRef = useRef(false);
+
+	const { messages, input, handleInputChange, handleSubmit, setMessages } =
+		useChat({
+			onFinish: async (message) => {
+				console.log(
+					"onFinish called, messages.length:",
+					messages.length,
+					"isDebating:",
+					isDebatingRef.current,
+				);
+				// ユーザーのメッセージに対する最初のAI応答が完了した後、議論を開始
+				if (messages.length === 1 && !isDebatingRef.current) {
+					console.log("Starting debate...");
+					setIsDebating(true);
+					isDebatingRef.current = true;
+					const { startDebate } = await import(
+						"@/lib/llm/continue-conversation"
+					);
+					const currentMessages = [...messages, message];
+					startDebate({
+						messages: currentMessages,
+						onNewMessage: addMessage,
+						initialTurnNumber: 1,
+					});
+				}
+			},
+		});
+
+	// メッセージを追加する関数
+	const addMessage = useCallback(
+		(newMessage: Message) => {
+			setMessages((prevMessages) => [...prevMessages, newMessage]);
+		},
+		[setMessages],
+	);
+
+	// 議論制御関数
+	const startDebate = useCallback(() => {
+		setIsDebating(true);
+	}, []);
+
+	const stopDebate = useCallback(() => {
+		setIsDebating(false);
+	}, []);
+
+	const resetDebate = useCallback(() => {
+		setIsDebating(false);
+		setTurnNumber(0);
+		setMessages([]);
+	}, [setMessages]);
 
 	return (
 		<div>
@@ -15,7 +69,7 @@ function DebatePage() {
 			<main className="p-4 mb-[120px]">
 				<section className="flex flex-col gap-4">
 					{messages.map((msg) => (
-						<Message
+						<MessageComponent
 							key={msg.id}
 							id={msg.id}
 							role={msg.role}
@@ -30,6 +84,14 @@ function DebatePage() {
 						input={input}
 						handleSubmit={handleSubmit}
 						handleInputChange={handleInputChange}
+						messages={messages}
+						addMessage={addMessage}
+						isDebating={isDebating}
+						turnNumber={turnNumber}
+						setTurnNumber={setTurnNumber}
+						startDebate={startDebate}
+						stopDebate={stopDebate}
+						resetDebate={resetDebate}
 					/>
 				</section>
 			</main>

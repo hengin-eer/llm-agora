@@ -2,8 +2,23 @@
 
 import type { UIMessage } from "ai";
 
+// ターン数からロール名を判定する関数
+function getAIRoleName(content: string): string {
+	// メッセージの先頭でロールを判定
+	if (content.includes("要約:") && content.includes("同意理由:")) {
+		return "肯定派";
+	}
+	if (content.includes("要約:") && content.includes("反論:")) {
+		return "否定派";
+	}
+	if (content.includes("要約:") && content.includes("新しい切り口:")) {
+		return "展開派";
+	}
+	return "AIアシスタント";
+}
+
 function Message({ id, role, createdAt, content, parts }: UIMessage) {
-	const name = role === "user" ? "明石太郎" : "AIアシスタント";
+	const name = role === "user" ? "明石太郎" : getAIRoleName(content);
 
 	return (
 		<article

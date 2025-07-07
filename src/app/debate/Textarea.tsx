@@ -1,7 +1,7 @@
 "use client";
 
 import { getSystemPrompt } from "@/lib/llm/prompt-pool";
-import type { ChatRequestOptions } from "ai";
+import type { ChatRequestOptions, Message } from "ai";
 import { type ChangeEvent, type FormEvent, useState } from "react";
 
 type TextAreaProps = {
@@ -13,14 +13,35 @@ type TextAreaProps = {
 		chatRequestOptions?: ChatRequestOptions,
 	) => void;
 	handleInputChange: (e: ChangeEvent<HTMLTextAreaElement>) => void;
+	messages: Message[];
+	addMessage: (message: Message) => void;
+	isDebating: boolean;
+	turnNumber: number;
+	setTurnNumber: (turn: number) => void;
+	startDebate: () => void;
+	stopDebate: () => void;
+	resetDebate: () => void;
 };
 
-function TextArea({ input, handleSubmit, handleInputChange }: TextAreaProps) {
+function TextArea({
+	input,
+	handleSubmit,
+	handleInputChange,
+	messages,
+	addMessage,
+	isDebating,
+	turnNumber: propTurnNumber,
+	setTurnNumber: propSetTurnNumber,
+	startDebate: propStartDebate,
+	stopDebate,
+	resetDebate,
+}: TextAreaProps) {
 	const [turnNumber, setTurnNumber] = useState(0);
 	const systemPrompt = getSystemPrompt(turnNumber);
 
 	function incrementTurn() {
 		setTurnNumber((prev) => prev + 1);
+		propSetTurnNumber(turnNumber + 1);
 	}
 	console.log("turnNumber", turnNumber);
 	console.log("systemPrompt", systemPrompt);
