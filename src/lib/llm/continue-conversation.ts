@@ -25,6 +25,8 @@ type ContinueConversationOptions = {
 	maxTurns?: number;
 	intervalMs?: number;
 	isDebatingRef?: { current: boolean };
+	onLoadingStart?: (turnNumber: number) => void;
+	onLoadingEnd?: () => void;
 };
 
 export async function continueConversation({
@@ -32,15 +34,19 @@ export async function continueConversation({
 	onNewMessage,
 	turnNumber,
 	isDebating,
-	maxTurns = 30, // デフォルト最大ターン数
-	intervalMs = 2000, // デフォルト2秒間隔
+	maxTurns = 20, // デフォルト最大ターン数を20に削減（レートリミット対策）
+	intervalMs = 8000, // デフォルト8秒間隔に増加（レートリミット対策）
+	isDebatingRef,
+	onLoadingStart,
+	onLoadingEnd,
 }: ContinueConversationOptions): Promise<void> {
 	console.log(
 		`continueConversation called: turn ${turnNumber}, isDebating: ${isDebating}, messages: ${messages.length}`,
 	);
 
 	// 議論が停止されている場合は処理を終了
-	if (!isDebating) {
+	const currentIsDebating = isDebatingRef?.current ?? isDebating;
+	if (!currentIsDebating) {
 		console.log("議論が停止されています。処理を終了します。");
 		return;
 	}
@@ -94,9 +100,9 @@ export async function continueConversation({
 					// ストリーミングデータの解析
 					try {
 						const jsonStr = line.slice(2);
-						const data = JSON.parse(jsonStr);
-						if (data.type === "textDelta" && data.textDelta) {
-							assistantMessage += data.textDelta;
+						const text = JSON.parse(jsonStr);
+						if (typeof text === "string" && text.trim()) {
+							assistantMessage += text;
 						}
 					} catch (e) {
 						// JSON解析エラーは無視
@@ -126,6 +132,9 @@ export async function continueConversation({
 				isDebating,
 				maxTurns,
 				intervalMs,
+				isDebatingRef,
+				onLoadingStart,
+				onLoadingEnd,
 			});
 		}, intervalMs);
 	} catch (error) {
@@ -139,6 +148,9 @@ export async function continueConversation({
 				isDebating,
 				maxTurns,
 				intervalMs,
+				isDebatingRef,
+				onLoadingStart,
+				onLoadingEnd,
 			});
 		}, intervalMs * 2); // エラー時は少し長めに待つ
 	}
@@ -152,13 +164,15 @@ export function startDebate({
 	onNewMessage,
 	initialTurnNumber = 1,
 	maxTurns = 30,
-	intervalMs = 2000,
+	intervalMs = 5000,
+	isDebatingRef,
 }: {
 	messages: Message[];
 	onNewMessage: (message: Message) => void;
 	initialTurnNumber?: number;
 	maxTurns?: number;
 	intervalMs?: number;
+	isDebatingRef?: { current: boolean };
 }) {
 	console.log(
 		`startDebate called with ${messages.length} messages, starting turn ${initialTurnNumber}`,
@@ -170,9 +184,10 @@ export function startDebate({
 			messages,
 			onNewMessage,
 			turnNumber: initialTurnNumber,
-			isDebating: true,
+			isDebating: isDebatingRef?.current ?? true,
 			maxTurns,
 			intervalMs,
+			isDebatingRef,
 		});
 	}, 1000);
 }
