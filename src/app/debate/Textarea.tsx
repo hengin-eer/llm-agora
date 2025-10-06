@@ -1,56 +1,81 @@
 "use client";
-import { useRef, useState } from "react";
-import type { ChatMessageProps } from "./Message";
+
+import { getSystemPrompt } from "@/lib/llm/prompt-pool";
+import type { ChatRequestOptions, Message } from "ai";
+import { type ChangeEvent, type FormEvent, useState } from "react";
 
 type TextAreaProps = {
-	setChatMessages: (chatMessage: ChatMessageProps[]) => void;
+	input: string;
+	handleSubmit: (
+		event?: {
+			preventDefault?: () => void;
+		},
+		chatRequestOptions?: ChatRequestOptions,
+	) => void;
+	handleInputChange: (e: ChangeEvent<HTMLTextAreaElement>) => void;
+	messages: Message[];
+	addMessage: (message: Message) => void;
+	isDebating: boolean;
+	turnNumber: number;
+	setTurnNumber: (turn: number) => void;
+	startDebate: () => void;
+	stopDebate: () => void;
+	resetDebate: () => void;
 };
 
-function TextArea({ setChatMessages }: TextAreaProps) {
-	const hiddenInput = useRef<HTMLDivElement>(null);
-	const [value, setValue] = useState("");
-	const userName = "明石太郎";
+function TextArea({
+	input,
+	handleSubmit,
+	handleInputChange,
+	messages,
+	addMessage,
+	isDebating,
+	turnNumber: propTurnNumber,
+	setTurnNumber: propSetTurnNumber,
+	startDebate: propStartDebate,
+	stopDebate,
+	resetDebate,
+}: TextAreaProps) {
+	const [turnNumber, setTurnNumber] = useState(0);
+	const systemPrompt = getSystemPrompt(turnNumber);
+
+	function incrementTurn() {
+		setTurnNumber((prev) => prev + 1);
+		propSetTurnNumber(turnNumber + 1);
+	}
+	console.log("turnNumber", turnNumber);
+	console.log("systemPrompt", systemPrompt);
+
+	function handleOnSubmit(e: FormEvent<HTMLFormElement>) {
+		incrementTurn();
+		handleSubmit(e, {
+			body: {
+				nextSystem: systemPrompt,
+			},
+		});
+	}
 
 	return (
-		<div className="box-border flex items-end gap-2 w-full">
-			<div className="relative flex-1 w-full">
-				<div
-					className="invisible px-4 py-2 min-h-[2.5rem] overflow-x-hidden whitespace-pre-wrap wrap-anywhere"
-					aria-hidden={true}
-					ref={hiddenInput}
-				/>
+		<form
+			onSubmit={(e) => handleOnSubmit(e)}
+			className="box-border flex items-end gap-2 w-full"
+		>
+			<div className="flex-1 w-full">
+				{/* TODO: UIレイアウト崩れ＆改行時の自動拡張が無効化してしまったので別Issueでfixしよう */}
 				<textarea
-					className="absolute top-0 left-0 px-4 py-2 h-full w-full resize-none ring rounded-md"
+					className="px-4 py-2 h-full w-full resize-none ring rounded-md"
 					placeholder="メッセージを入力..."
-					value={value}
-					onChange={(e) => {
-						setValue(e.target.value);
-						if (hiddenInput.current)
-							hiddenInput.current.textContent = `${e.target.value}\u200b`;
-					}}
+					value={input}
+					onChange={handleInputChange}
 				/>
 			</div>
 			<button
 				className="w-max px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
 				type="submit"
-				onClick={() => {
-					if (value.trim() === "") return;
-					const pad = (n: number) => n.toString().padStart(2, "0");
-					const now = new Date();
-					const newMessage: ChatMessageProps = {
-						id: `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`,
-						message: value,
-						role: "user",
-						name: userName,
-					};
-          // TODO: 型の不一致を解消する。なんでやろ...
-					setChatMessages((prevMessages: ChatMessageProps[]) => [...prevMessages, newMessage]);
-					setValue("");
-				}}
 			>
 				送信
 			</button>
-		</div>
+		</form>
 	);
 }
 
