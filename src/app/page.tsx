@@ -9,6 +9,11 @@ type Message = {
 	roleName?: string; // 表示用のロール名
 };
 
+type ChatMessage = {
+	role: "user" | "assistant";
+	content: string;
+};
+
 // システムプロンプト定義
 const SYSTEM_PROMPTS = {
 	facilitator:
@@ -16,40 +21,86 @@ const SYSTEM_PROMPTS = {
 	positive: `あなたは討論に参加するAIアシスタントです。
 役割: 相手の意見を肯定しつつ、議論を深める建設的な参加者です。
 相手の発言を簡潔に要約し、同意する理由を説明し、新しい視点を追加してください。`,
+	negative: `あなたは討論に参加するAIアシスタントです。
+役割: 相手の意見に対して批判的思考を示し、異なる立場から建設的に反論を行います。
+相手の発言を要約し、問題点を指摘し、別の観点を示してください。`,
 };
+
+// ロール定義
+const ROLES = [
+	{
+		key: "facilitator",
+		name: "ファシリテーター",
+		prompt: SYSTEM_PROMPTS.facilitator,
+	},
+	{ key: "positive", name: "肯定派", prompt: SYSTEM_PROMPTS.positive },
+	{ key: "negative", name: "否定派", prompt: SYSTEM_PROMPTS.negative },
+] as const;
+
+/**
+ * 最低待機時間を保証するsleep関数
+ * @param ms 待機時間（ミリ秒）
+ */
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * APIを呼び出す関数（最低待機時間付き）
+ * - 会話履歴を含めてリクエスト
+ * - レスポンスが来るまで次のリクエストは行わない（この関数はawaitで呼ばれる前提）
+ * - 最低待機時間を保証（レスポンスが早くても指定時間は待つ）
+ */
+async function callAPIWithMinInterval(
+	messageHistory: ChatMessage[],
+	systemPrompt: string,
+	minIntervalMs = 0,
+): Promise<string> {
+	const startTime = Date.now();
+
+	// APIリクエスト
+	const response = await fetch("/api/chat", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			messages: messageHistory,
+			systemPrompt,
+		}),
+	});
+
+	const data = await response.json();
+
+	if (!response.ok) {
+		throw new Error(data.error || "APIエラー");
+	}
+
+	// 経過時間を計算
+	const elapsedTime = Date.now() - startTime;
+	const remainingTime = minIntervalMs - elapsedTime;
+
+	// 最低待機時間に満たない場合は待機
+	if (remainingTime > 0) {
+		console.log(`⏳ 残り ${remainingTime}ms 待機中...`);
+		await sleep(remainingTime);
+	}
+
+	console.log(`✅ API呼び出し完了 (実行時間: ${Date.now() - startTime}ms)`);
+	return data.content;
+}
 
 export default function Home() {
 	const [topic, setTopic] = useState("");
 	const [messages, setMessages] = useState<Message[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [currentRole, setCurrentRole] = useState<string>("");
+	const [minInterval, setMinInterval] = useState(5); // デフォルト5秒
 
-	// APIを呼び出す共通関数
-	const callAPI = async (
-		messageHistory: { role: string; content: string }[],
-		systemPrompt: string,
-	): Promise<string> => {
-		const response = await fetch("/api/chat", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({
-				messages: messageHistory,
-				systemPrompt,
-			}),
-		});
-
-		const data = await response.json();
-		console.log("API Response:", data);
-
-		if (!response.ok) {
-			throw new Error(data.error || "APIエラー");
-		}
-
-		return data.content;
-	};
-
-	// ステップ2: 2回連続でAPIを呼び出す
-	const handleTwoRequests = async () => {
+	/**
+	 * 連続議論を実行する関数
+	 * - 各ロールを順番に実行
+	 * - 会話履歴を蓄積しながらリクエスト
+	 * - 最低待機時間を適用
+	 */
+	const handleContinuousDebate = async () => {
 		if (!topic.trim()) {
 			alert("議題を入力してください");
 			return;
@@ -59,8 +110,11 @@ export default function Home() {
 		setError(null);
 		setMessages([]);
 
+		// 会話履歴を管理
+		const chatHistory: ChatMessage[] = [];
+
 		try {
-			// 1. ユーザーメッセージ
+			// 1. ユーザーメッセージを追加
 			const userMessage: Message = {
 				id: `user-${Date.now()}`,
 				role: "user",
@@ -68,46 +122,44 @@ export default function Home() {
 				roleName: "ユーザー",
 			};
 			setMessages([userMessage]);
+			chatHistory.push({ role: "user", content: topic });
 
-			// 2. 1回目のAPI呼び出し（ファシリテーター）
-			console.log("=== 1回目のリクエスト: ファシリテーター ===");
-			const firstResponse = await callAPI(
-				[{ role: "user", content: topic }],
-				SYSTEM_PROMPTS.facilitator,
-			);
+			// 2. 各ロールを順番に実行
+			for (const role of ROLES) {
+				setCurrentRole(role.name);
+				console.log(`=== ${role.name} のリクエスト開始 ===`);
+				console.log(`📜 会話履歴: ${chatHistory.length}件`);
 
-			const firstAIMessage: Message = {
-				id: `ai-1-${Date.now()}`,
-				role: "assistant",
-				content: firstResponse,
-				roleName: "ファシリテーター",
-			};
-			setMessages((prev) => [...prev, firstAIMessage]);
+				// APIを呼び出し（最低待機時間付き）
+				const response = await callAPIWithMinInterval(
+					chatHistory,
+					role.prompt,
+					minInterval * 1000, // 秒をミリ秒に変換
+				);
 
-			// 3. 2回目のAPI呼び出し（肯定派）- 会話履歴を含める
-			console.log("=== 2回目のリクエスト: 肯定派 ===");
-			const secondResponse = await callAPI(
-				[
-					{ role: "user", content: topic },
-					{ role: "assistant", content: firstResponse },
-				],
-				SYSTEM_PROMPTS.positive,
-			);
+				// 応答をメッセージに追加
+				const aiMessage: Message = {
+					id: `ai-${role.key}-${Date.now()}`,
+					role: "assistant",
+					content: response,
+					roleName: role.name,
+				};
+				setMessages((prev) => [...prev, aiMessage]);
 
-			const secondAIMessage: Message = {
-				id: `ai-2-${Date.now()}`,
-				role: "assistant",
-				content: secondResponse,
-				roleName: "肯定派",
-			};
-			setMessages((prev) => [...prev, secondAIMessage]);
+				// 会話履歴に追加（次のロールが参照できるように）
+				chatHistory.push({ role: "assistant", content: response });
 
-			console.log("=== 2回のリクエスト完了 ===");
+				console.log(`=== ${role.name} のリクエスト完了 ===`);
+			}
+
+			setCurrentRole("");
+			console.log("=== すべてのリクエスト完了 ===");
 		} catch (err) {
 			console.error("Error:", err);
 			setError(String(err));
 		} finally {
 			setIsLoading(false);
+			setCurrentRole("");
 		}
 	};
 
@@ -115,7 +167,7 @@ export default function Home() {
 		<div className="min-h-screen bg-gray-50 p-8">
 			<div className="max-w-2xl mx-auto">
 				<h1 className="text-2xl font-bold mb-6">
-					ステップ2: 2回連続APIリクエストテスト
+					ステップ3: 連続APIリクエスト（最低待機時間付き）
 				</h1>
 
 				{/* 入力エリア */}
@@ -127,15 +179,33 @@ export default function Home() {
 						className="w-full p-3 border rounded-lg resize-none"
 						rows={2}
 					/>
+
+					{/* 最低待機時間設定 */}
+					<div className="mt-3 flex items-center gap-2">
+						<label htmlFor="interval" className="text-sm text-gray-600">
+							最低待機時間:
+						</label>
+						<input
+							id="interval"
+							type="number"
+							min={1}
+							max={60}
+							value={minInterval}
+							onChange={(e) => setMinInterval(Number(e.target.value))}
+							className="w-20 p-2 border rounded"
+						/>
+						<span className="text-sm text-gray-600">秒</span>
+					</div>
+
 					<button
 						type="button"
-						onClick={handleTwoRequests}
+						onClick={handleContinuousDebate}
 						disabled={isLoading}
-						className="mt-2 bg-blue-500 text-white px-4 py-2 rounded-lg disabled:bg-gray-300"
+						className="mt-3 bg-blue-500 text-white px-4 py-2 rounded-lg disabled:bg-gray-300"
 					>
 						{isLoading
-							? "送信中..."
-							: "2回連続で送信（ファシリテーター → 肯定派）"}
+							? `処理中... (${currentRole})`
+							: "議論開始（ファシリテーター → 肯定派 → 否定派）"}
 					</button>
 				</div>
 
@@ -166,7 +236,9 @@ export default function Home() {
 						<p className="text-gray-500">メッセージがありません</p>
 					)}
 					{isLoading && (
-						<div className="text-blue-500 animate-pulse">処理中...</div>
+						<div className="text-blue-500 animate-pulse">
+							{currentRole ? `${currentRole} が応答中...` : "処理中..."}
+						</div>
 					)}
 				</div>
 			</div>
