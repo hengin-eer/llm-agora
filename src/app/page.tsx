@@ -1,300 +1,545 @@
 "use client";
 
-import MessageComponent from "@/components/Message";
-import type { Message } from "ai";
-import { useCallback, useRef, useState } from "react";
+import { useRef, useState } from "react";
+
+type Message = {
+	id: string;
+	role: "user" | "assistant";
+	content: string;
+	roleName?: string; // 表示用のロール名
+};
+
+type ChatMessage = {
+	role: "user" | "assistant";
+	content: string;
+};
+
+// 議論モード
+type DebateMode = "fixed" | "loop" | "consensus";
+
+// システムプロンプト定義
+const SYSTEM_PROMPTS = {
+	facilitator:
+		"あなたは議論のファシリテーターです。与えられた議題について簡潔に論点を整理してください。",
+	positive: `あなたは討論に参加するAIアシスタントです。
+役割: 相手の意見を肯定しつつ、議論を深める建設的な参加者です。
+相手の発言を簡潔に要約し、同意する理由を説明し、新しい視点を追加してください。`,
+	negative: `あなたは討論に参加するAIアシスタントです。
+役割: 相手の意見に対して批判的思考を示し、異なる立場から建設的に反論を行います。
+相手の発言を要約し、問題点を指摘し、別の観点を示してください。`,
+	consensus: `あなたは討論に参加するAIアシスタントです。
+これまでの議論を踏まえて、合意点と残る対立点を整理してください。
+もし十分な合意が得られたと判断した場合は、応答の最後に「[合意達成]」と記載してください。
+まだ議論が必要な場合は、次に議論すべきポイントを提示してください。`,
+};
+
+// ロール定義
+const DEBATE_ROLES = {
+	facilitator: {
+		key: "facilitator",
+		name: "ファシリテーター",
+		prompt: SYSTEM_PROMPTS.facilitator,
+	},
+	positive: {
+		key: "positive",
+		name: "肯定派",
+		prompt: SYSTEM_PROMPTS.positive,
+	},
+	negative: {
+		key: "negative",
+		name: "否定派",
+		prompt: SYSTEM_PROMPTS.negative,
+	},
+	consensus: {
+		key: "consensus",
+		name: "合意確認",
+		prompt: SYSTEM_PROMPTS.consensus,
+	},
+} as const;
+
+/**
+ * 最低待機時間を保証するsleep関数
+ */
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * APIを呼び出す関数（最低待機時間付き）
+ */
+async function callAPIWithMinInterval(
+	messageHistory: ChatMessage[],
+	systemPrompt: string,
+	minIntervalMs = 0,
+): Promise<string> {
+	const startTime = Date.now();
+
+	const response = await fetch("/api/chat", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			messages: messageHistory,
+			systemPrompt,
+		}),
+	});
+
+	const data = await response.json();
+
+	if (!response.ok) {
+		throw new Error(data.error || "APIエラー");
+	}
+
+	const elapsedTime = Date.now() - startTime;
+	const remainingTime = minIntervalMs - elapsedTime;
+
+	if (remainingTime > 0) {
+		console.log(`⏳ 残り ${remainingTime}ms 待機中...`);
+		await sleep(remainingTime);
+	}
+
+	console.log(`✅ API呼び出し完了 (実行時間: ${Date.now() - startTime}ms)`);
+	return data.content;
+}
 
 export default function Home() {
-	const [isDebating, setIsDebating] = useState(false);
 	const [topic, setTopic] = useState("");
 	const [messages, setMessages] = useState<Message[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
-	const isDebatingRef = useRef(false);
+	const [error, setError] = useState<string | null>(null);
+	const [currentRole, setCurrentRole] = useState<string>("");
+	const [minInterval, setMinInterval] = useState(5);
 
-	// メッセージを追加する関数
-	const addMessage = useCallback((newMessage: Message) => {
-		setMessages((prevMessages) => [...prevMessages, newMessage]);
-	}, []);
+	// モード関連
+	const [debateMode, setDebateMode] = useState<DebateMode>("fixed");
+	const [turnCount, setTurnCount] = useState(3); // 回数指定モード用
+	const [loopCount, setLoopCount] = useState(2); // ループモード用（肯定→否定のセット回数）
 
-	// 議論を開始する関数
-	const handleStartDebate = useCallback(async () => {
+	// 停止制御用
+	const stopRef = useRef(false);
+
+	/**
+	 * メッセージを追加するヘルパー関数
+	 */
+	const addMessage = (
+		chatHistory: ChatMessage[],
+		content: string,
+		roleName: string,
+		roleKey: string,
+	) => {
+		const aiMessage: Message = {
+			id: `ai-${roleKey}-${Date.now()}-${Math.random()}`,
+			role: "assistant",
+			content,
+			roleName,
+		};
+		setMessages((prev) => [...prev, aiMessage]);
+		chatHistory.push({ role: "assistant", content });
+	};
+
+	/**
+	 * モード1: 回数指定モード
+	 * - 指定した回数だけロールを順番に実行
+	 */
+	const runFixedMode = async (
+		chatHistory: ChatMessage[],
+		intervalMs: number,
+	) => {
+		const roles = [
+			DEBATE_ROLES.facilitator,
+			DEBATE_ROLES.positive,
+			DEBATE_ROLES.negative,
+		];
+
+		for (let i = 0; i < turnCount; i++) {
+			if (stopRef.current) break;
+
+			const role = roles[i % roles.length];
+			setCurrentRole(`${role.name} (${i + 1}/${turnCount})`);
+			console.log(
+				`=== ${role.name} のリクエスト開始 (${i + 1}/${turnCount}) ===`,
+			);
+
+			const response = await callAPIWithMinInterval(
+				chatHistory,
+				role.prompt,
+				intervalMs,
+			);
+
+			if (stopRef.current) break;
+			addMessage(chatHistory, response, `${role.name} [T${i + 1}]`, role.key);
+		}
+	};
+
+	/**
+	 * モード2: ループモード
+	 * - 肯定派 → 否定派 を指定回数繰り返す
+	 */
+	const runLoopMode = async (
+		chatHistory: ChatMessage[],
+		intervalMs: number,
+	) => {
+		// 最初にファシリテーター
+		if (!stopRef.current) {
+			setCurrentRole("ファシリテーター (開始)");
+			const facilitatorResponse = await callAPIWithMinInterval(
+				chatHistory,
+				DEBATE_ROLES.facilitator.prompt,
+				intervalMs,
+			);
+			if (!stopRef.current) {
+				addMessage(
+					chatHistory,
+					facilitatorResponse,
+					"ファシリテーター",
+					"facilitator",
+				);
+			}
+		}
+
+		// 肯定派 → 否定派 をループ
+		for (let i = 0; i < loopCount; i++) {
+			if (stopRef.current) break;
+
+			// 肯定派
+			setCurrentRole(`肯定派 (ラウンド ${i + 1}/${loopCount})`);
+			const positiveResponse = await callAPIWithMinInterval(
+				chatHistory,
+				DEBATE_ROLES.positive.prompt,
+				intervalMs,
+			);
+			if (stopRef.current) break;
+			addMessage(
+				chatHistory,
+				positiveResponse,
+				`肯定派 [R${i + 1}]`,
+				"positive",
+			);
+
+			// 否定派
+			setCurrentRole(`否定派 (ラウンド ${i + 1}/${loopCount})`);
+			const negativeResponse = await callAPIWithMinInterval(
+				chatHistory,
+				DEBATE_ROLES.negative.prompt,
+				intervalMs,
+			);
+			if (stopRef.current) break;
+			addMessage(
+				chatHistory,
+				negativeResponse,
+				`否定派 [R${i + 1}]`,
+				"negative",
+			);
+		}
+	};
+
+	/**
+	 * モード3: 合意達成モード
+	 * - 肯定派 → 否定派 → 合意確認 を繰り返す
+	 * - 合意確認が「[合意達成]」を含むまで継続（最大10ラウンド）
+	 */
+	const runConsensusMode = async (
+		chatHistory: ChatMessage[],
+		intervalMs: number,
+	) => {
+		const maxRounds = 10;
+
+		// 最初にファシリテーター
+		if (!stopRef.current) {
+			setCurrentRole("ファシリテーター (開始)");
+			const facilitatorResponse = await callAPIWithMinInterval(
+				chatHistory,
+				DEBATE_ROLES.facilitator.prompt,
+				intervalMs,
+			);
+			if (!stopRef.current) {
+				addMessage(
+					chatHistory,
+					facilitatorResponse,
+					"ファシリテーター",
+					"facilitator",
+				);
+			}
+		}
+
+		for (let round = 1; round <= maxRounds; round++) {
+			if (stopRef.current) break;
+
+			// 肯定派
+			setCurrentRole(`肯定派 (ラウンド ${round})`);
+			const positiveResponse = await callAPIWithMinInterval(
+				chatHistory,
+				DEBATE_ROLES.positive.prompt,
+				intervalMs,
+			);
+			if (stopRef.current) break;
+			addMessage(
+				chatHistory,
+				positiveResponse,
+				`肯定派 [R${round}]`,
+				"positive",
+			);
+
+			// 否定派
+			setCurrentRole(`否定派 (ラウンド ${round})`);
+			const negativeResponse = await callAPIWithMinInterval(
+				chatHistory,
+				DEBATE_ROLES.negative.prompt,
+				intervalMs,
+			);
+			if (stopRef.current) break;
+			addMessage(
+				chatHistory,
+				negativeResponse,
+				`否定派 [R${round}]`,
+				"negative",
+			);
+
+			// 合意確認
+			setCurrentRole(`合意確認 (ラウンド ${round})`);
+			const consensusResponse = await callAPIWithMinInterval(
+				chatHistory,
+				DEBATE_ROLES.consensus.prompt,
+				intervalMs,
+			);
+			if (stopRef.current) break;
+			addMessage(
+				chatHistory,
+				consensusResponse,
+				`合意確認 [R${round}]`,
+				"consensus",
+			);
+
+			// 合意達成チェック
+			if (consensusResponse.includes("[合意達成]")) {
+				console.log("🎉 合意に達しました！");
+				break;
+			}
+
+			if (round === maxRounds) {
+				console.log("⚠️ 最大ラウンド数に達しました");
+			}
+		}
+	};
+
+	/**
+	 * 議論を開始
+	 */
+	const handleStartDebate = async () => {
 		if (!topic.trim()) {
 			alert("議題を入力してください");
 			return;
 		}
 
-		console.log("🚀 handleStartDebate called with topic:", topic);
-		setIsDebating(true);
 		setIsLoading(true);
-		isDebatingRef.current = true;
-
-		// ユーザーメッセージを作成
-		const userMessage: Message = {
-			id: `msg-${Date.now()}-${Math.random()}`,
-			role: "user",
-			content: topic,
-			createdAt: new Date(),
-		};
-
-		console.log("📝 Created user message:", userMessage);
-		setMessages([userMessage]);
-		console.log("✅ Added user message to state");
-
-		// 最初のAI応答を取得
-		try {
-			console.log("🔄 Calling API...");
-			const response = await fetch("/api/chat", {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({
-					messages: [userMessage],
-					nextSystem:
-						"[ROOT_PAGE] あなたは議論のファシリテーターです。与えられた議題について、まず簡潔に論点を整理し、議論の方向性を示してください。",
-				}),
-			});
-
-			if (!response.ok) {
-				throw new Error(`APIリクエストが失敗しました: ${response.status}`);
-			}
-
-			const reader = response.body?.getReader();
-			if (!reader) {
-				throw new Error("レスポンスボディが取得できませんでした");
-			}
-
-			let assistantMessage = "";
-			const decoder = new TextDecoder();
-
-			console.log("📖 Reading response stream...");
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
-
-				const chunk = decoder.decode(value, { stream: true });
-				console.log("📦 Raw chunk:", chunk);
-				const lines = chunk.split("\n");
-				console.log("📄 Split lines:", lines);
-
-				for (const line of lines) {
-					console.log("🔍 Processing line:", line);
-					if (line.startsWith("0:")) {
-						try {
-							// "0:" の後の部分を取得してJSONとしてパース
-							const jsonStr = line.slice(2);
-							console.log("🔧 JSON string:", jsonStr);
-							// JSONをパースしてテキストを直接取得
-							const text = JSON.parse(jsonStr);
-							console.log("📊 Parsed text:", text);
-							if (typeof text === "string" && text.trim()) {
-								assistantMessage += text;
-								console.log("✅ Added text:", text);
-							}
-						} catch (e) {
-							console.log("❌ JSON parse error:", e);
-						}
-					}
-				}
-			}
-
-			console.log("📄 Complete assistant message:", assistantMessage);
-			setIsLoading(false);
-
-			// AIメッセージを作成
-			const aiMessage: Message = {
-				id: `msg-${Date.now()}-${Math.random()}`,
-				role: "assistant",
-				content: assistantMessage.trim(),
-				createdAt: new Date(),
-			};
-
-			console.log("🤖 Created AI message:", aiMessage);
-			// メッセージを追加し、議論を開始
-			setMessages((prev) => [...prev, aiMessage]);
-			console.log("✅ Updated messages state with AI response");
-
-			// 少し待ってから議論を開始
-			setTimeout(async () => {
-				console.log("🚀 Starting continuous debate...");
-				const { continueConversation } = await import(
-					"@/lib/llm/continue-conversation"
-				);
-				continueConversation({
-					messages: [userMessage, aiMessage],
-					onNewMessage: (newMessage: Message) => {
-						console.log("📨 New message from debate:", newMessage);
-						addMessage(newMessage);
-					},
-					turnNumber: 1,
-					isDebating: true,
-					maxTurns: 20,
-					intervalMs: 8000,
-					isDebatingRef,
-				});
-			}, 2000);
-		} catch (error) {
-			console.error("❌ エラー:", error);
-			alert("議論の開始に失敗しました");
-			setIsDebating(false);
-			setIsLoading(false);
-			isDebatingRef.current = false;
-		}
-	}, [topic, addMessage]);
-
-	// 議論を停止する関数
-	const handleStopDebate = useCallback(() => {
-		setIsDebating(false);
-		isDebatingRef.current = false;
-	}, []);
-
-	// 議論をリセットする函数
-	const handleResetDebate = useCallback(() => {
-		setIsDebating(false);
-		isDebatingRef.current = false;
+		setError(null);
 		setMessages([]);
-		setTopic("");
-	}, []);
+		stopRef.current = false;
+
+		const chatHistory: ChatMessage[] = [];
+
+		try {
+			// ユーザーメッセージを追加
+			const userMessage: Message = {
+				id: `user-${Date.now()}`,
+				role: "user",
+				content: topic,
+				roleName: "ユーザー",
+			};
+			setMessages([userMessage]);
+			chatHistory.push({ role: "user", content: topic });
+
+			const intervalMs = minInterval * 1000;
+
+			// モードに応じて実行
+			switch (debateMode) {
+				case "fixed":
+					await runFixedMode(chatHistory, intervalMs);
+					break;
+				case "loop":
+					await runLoopMode(chatHistory, intervalMs);
+					break;
+				case "consensus":
+					await runConsensusMode(chatHistory, intervalMs);
+					break;
+			}
+
+			console.log("=== 議論完了 ===");
+		} catch (err) {
+			console.error("Error:", err);
+			setError(String(err));
+		} finally {
+			setIsLoading(false);
+			setCurrentRole("");
+		}
+	};
+
+	/**
+	 * 議論を停止
+	 */
+	const handleStopDebate = () => {
+		stopRef.current = true;
+		setCurrentRole("停止中...");
+	};
 
 	return (
-		<div className="min-h-screen bg-gray-50">
-			<header className="bg-white shadow-sm border-b">
-				<div className="max-w-4xl mx-auto px-4 py-6">
-					<h1 className="text-3xl font-bold text-gray-900 text-center">
-						LLM議論自走システム
-					</h1>
-					<p className="text-gray-600 text-center mt-2">
-						議題を入力すると、AIエージェントが自動的に議論を展開します
-					</p>
+		<div className="min-h-screen bg-gray-50 p-8">
+			<div className="max-w-2xl mx-auto">
+				<h1 className="text-2xl font-bold mb-6">LLM Agora - 議論システム</h1>
+
+				{/* 入力エリア */}
+				<div className="bg-white p-4 rounded-lg shadow mb-6">
+					<textarea
+						value={topic}
+						onChange={(e) => setTopic(e.target.value)}
+						placeholder="議題を入力..."
+						className="w-full p-3 border rounded-lg resize-none"
+						rows={2}
+						disabled={isLoading}
+					/>
+
+					{/* モード選択 */}
+					<div className="mt-4 p-3 bg-gray-50 rounded-lg">
+						<p className="text-sm font-medium text-gray-700 mb-2">
+							議論モード:
+						</p>
+						<div className="space-y-2">
+							<label className="flex items-center gap-2 cursor-pointer">
+								<input
+									type="radio"
+									name="debateMode"
+									value="fixed"
+									checked={debateMode === "fixed"}
+									onChange={(e) => setDebateMode(e.target.value as DebateMode)}
+									disabled={isLoading}
+								/>
+								<span className="text-sm">回数指定</span>
+								{debateMode === "fixed" && (
+									<input
+										type="number"
+										min={1}
+										max={20}
+										value={turnCount}
+										onChange={(e) => setTurnCount(Number(e.target.value))}
+										className="w-16 p-1 border rounded text-sm"
+										disabled={isLoading}
+									/>
+								)}
+								{debateMode === "fixed" && (
+									<span className="text-xs text-gray-500">ターン</span>
+								)}
+							</label>
+
+							<label className="flex items-center gap-2 cursor-pointer">
+								<input
+									type="radio"
+									name="debateMode"
+									value="loop"
+									checked={debateMode === "loop"}
+									onChange={(e) => setDebateMode(e.target.value as DebateMode)}
+									disabled={isLoading}
+								/>
+								<span className="text-sm">ループ（肯定↔否定）</span>
+								{debateMode === "loop" && (
+									<input
+										type="number"
+										min={1}
+										max={100}
+										value={loopCount}
+										onChange={(e) => setLoopCount(Number(e.target.value))}
+										className="w-16 p-1 border rounded text-sm"
+										disabled={isLoading}
+									/>
+								)}
+								{debateMode === "loop" && (
+									<span className="text-xs text-gray-500">ラウンド</span>
+								)}
+							</label>
+
+							<label className="flex items-center gap-2 cursor-pointer">
+								<input
+									type="radio"
+									name="debateMode"
+									value="consensus"
+									checked={debateMode === "consensus"}
+									onChange={(e) => setDebateMode(e.target.value as DebateMode)}
+									disabled={isLoading}
+								/>
+								<span className="text-sm">合意達成まで（最大10ラウンド）</span>
+							</label>
+						</div>
+					</div>
+
+					{/* 最低待機時間設定 */}
+					<div className="mt-3 flex items-center gap-2">
+						<label htmlFor="interval" className="text-sm text-gray-600">
+							最低待機時間:
+						</label>
+						<input
+							id="interval"
+							type="number"
+							min={1}
+							max={60}
+							value={minInterval}
+							onChange={(e) => setMinInterval(Number(e.target.value))}
+							className="w-20 p-2 border rounded"
+							disabled={isLoading}
+						/>
+						<span className="text-sm text-gray-600">秒</span>
+					</div>
+
+					{/* ボタン */}
+					<div className="mt-3 flex gap-2">
+						<button
+							type="button"
+							onClick={handleStartDebate}
+							disabled={isLoading}
+							className="bg-blue-500 text-white px-4 py-2 rounded-lg disabled:bg-gray-300"
+						>
+							{isLoading ? `処理中... (${currentRole})` : "議論開始"}
+						</button>
+						{isLoading && (
+							<button
+								type="button"
+								onClick={handleStopDebate}
+								className="bg-red-500 text-white px-4 py-2 rounded-lg"
+							>
+								停止
+							</button>
+						)}
+					</div>
 				</div>
-			</header>
 
-			<main className="max-w-4xl mx-auto px-4 py-8">
-				{/* 議題入力エリア */}
-				{!isDebating && messages.length === 0 && (
-					<div className="bg-white rounded-lg shadow-md p-6 mb-6">
-						<h2 className="text-xl font-semibold mb-4">
-							議題を入力してください
-						</h2>
-						<div className="space-y-4">
-							<textarea
-								value={topic}
-								onChange={(e) => setTopic(e.target.value)}
-								placeholder="例: AIの発達は人類にとって良いことか悪いことか"
-								className="w-full p-3 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-								rows={3}
-							/>
-							<div className="flex gap-2">
-								<button
-									type="button"
-									onClick={handleStartDebate}
-									disabled={!topic.trim() || isLoading}
-									className="bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 text-white px-6 py-2 rounded-lg font-medium transition-colors"
-								>
-									{isLoading ? "準備中..." : "議論を開始"}
-								</button>
-							</div>
-						</div>
+				{/* エラー表示 */}
+				{error && (
+					<div className="bg-red-100 border border-red-400 text-red-700 p-4 rounded mb-4">
+						エラー: {error}
 					</div>
 				)}
 
-				{/* コントロールパネル */}
-				{(isDebating || messages.length > 0) && (
-					<div className="bg-white rounded-lg shadow-md p-4 mb-6">
-						<div className="flex items-center justify-between">
-							<div>
-								<span className="text-sm text-gray-600">現在の状態: </span>
-								<span
-									className={`font-medium ${
-										isDebating ? "text-green-600" : "text-red-600"
-									}`}
-								>
-									{isDebating ? "議論進行中" : "議論停止中"}
-								</span>
+				{/* メッセージ表示 */}
+				<div className="bg-white p-4 rounded-lg shadow">
+					<h2 className="font-bold mb-4">メッセージ ({messages.length}件)</h2>
+					{messages.map((msg) => (
+						<div
+							key={msg.id}
+							className={`p-3 mb-2 rounded-lg ${
+								msg.role === "user" ? "bg-blue-100" : "bg-green-100"
+							}`}
+						>
+							<div className="text-xs text-gray-500 mb-1">
+								{msg.roleName || (msg.role === "user" ? "ユーザー" : "AI")}
 							</div>
-							<div className="flex gap-2">
-								{isDebating ? (
-									<button
-										type="button"
-										onClick={handleStopDebate}
-										className="bg-red-500 hover:bg-red-600 text-white px-4 py-1 rounded text-sm transition-colors"
-									>
-										停止
-									</button>
-								) : (
-									<button
-										type="button"
-										onClick={handleStartDebate}
-										disabled={!topic.trim()}
-										className="bg-green-500 hover:bg-green-600 disabled:bg-gray-300 text-white px-4 py-1 rounded text-sm transition-colors"
-									>
-										再開
-									</button>
-								)}
-								<button
-									type="button"
-									onClick={handleResetDebate}
-									className="bg-gray-500 hover:bg-gray-600 text-white px-4 py-1 rounded text-sm transition-colors"
-								>
-									リセット
-								</button>
-							</div>
+							<div className="whitespace-pre-wrap">{msg.content}</div>
 						</div>
-					</div>
-				)}
-
-				{/* 議論の表示エリア */}
-				<div className="bg-white rounded-lg shadow-md">
-					{/* デバッグ情報 */}
-					<div className="p-2 bg-gray-100 text-xs">
-						デバッグ: メッセージ数 = {messages.length}
-					</div>
-					{messages.length > 0 && (
-						<div className="p-4">
-							<h3 className="text-lg font-semibold mb-4">議論の流れ</h3>
-							<div className="space-y-4">
-								{messages.map((msg, index) => (
-									<div key={msg.id}>
-										<div className="text-xs text-gray-500 mb-1">
-											メッセージ{index + 1}: {msg.role} -{" "}
-											{msg.content.substring(0, 50)}...
-										</div>
-										<MessageComponent
-											id={msg.id}
-											role={msg.role}
-											createdAt={msg.createdAt}
-											content={msg.content}
-											parts={msg.parts || []}
-										/>
-									</div>
-								))}
-								{isLoading && (
-									<div className="flex items-center space-x-2 p-4">
-										<div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" />
-										<div
-											className="w-2 h-2 bg-blue-400 rounded-full animate-bounce"
-											style={{ animationDelay: "0.1s" }}
-										/>
-										<div
-											className="w-2 h-2 bg-blue-400 rounded-full animate-bounce"
-											style={{ animationDelay: "0.2s" }}
-										/>
-										<span className="text-sm text-gray-500 ml-2">
-											議論を生成中...
-										</span>
-									</div>
-								)}
-							</div>
-						</div>
-					)}
-
+					))}
 					{messages.length === 0 && (
-						<div className="p-8 text-center text-gray-500">
-							議題を入力して議論を開始してください
+						<p className="text-gray-500">メッセージがありません</p>
+					)}
+					{isLoading && (
+						<div className="text-blue-500 animate-pulse">
+							{currentRole ? `${currentRole} が応答中...` : "処理中..."}
 						</div>
 					)}
 				</div>
-			</main>
+			</div>
 		</div>
 	);
 }
