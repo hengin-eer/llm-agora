@@ -1,5 +1,6 @@
 "use client";
 
+import { MarkdownPreview } from "@/components/MarkdownPreview";
 import { useRef, useState } from "react";
 
 type Message = {
@@ -527,7 +528,11 @@ export default function Home() {
 							<div className="text-xs text-gray-500 mb-1">
 								{msg.roleName || (msg.role === "user" ? "ユーザー" : "AI")}
 							</div>
-							<div className="whitespace-pre-wrap">{msg.content}</div>
+							{msg.role === "user" ? (
+								<div className="whitespace-pre-wrap">{msg.content}</div>
+							) : (
+								<MarkdownPreview content={msg.content} />
+							)}
 						</div>
 					))}
 					{messages.length === 0 && (
