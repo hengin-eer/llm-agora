@@ -164,7 +164,7 @@ export default function Home() {
 			);
 
 			if (stopRef.current) break;
-			addMessage(chatHistory, response, role.name, role.key);
+			addMessage(chatHistory, response, `${role.name} [T${i + 1}]`, role.key);
 		}
 	};
 
@@ -206,7 +206,12 @@ export default function Home() {
 				intervalMs,
 			);
 			if (stopRef.current) break;
-			addMessage(chatHistory, positiveResponse, "肯定派", "positive");
+			addMessage(
+				chatHistory,
+				positiveResponse,
+				`肯定派 [R${i + 1}]`,
+				"positive",
+			);
 
 			// 否定派
 			setCurrentRole(`否定派 (ラウンド ${i + 1}/${loopCount})`);
@@ -216,7 +221,12 @@ export default function Home() {
 				intervalMs,
 			);
 			if (stopRef.current) break;
-			addMessage(chatHistory, negativeResponse, "否定派", "negative");
+			addMessage(
+				chatHistory,
+				negativeResponse,
+				`否定派 [R${i + 1}]`,
+				"negative",
+			);
 		}
 	};
 
@@ -260,7 +270,12 @@ export default function Home() {
 				intervalMs,
 			);
 			if (stopRef.current) break;
-			addMessage(chatHistory, positiveResponse, "肯定派", "positive");
+			addMessage(
+				chatHistory,
+				positiveResponse,
+				`肯定派 [R${round}]`,
+				"positive",
+			);
 
 			// 否定派
 			setCurrentRole(`否定派 (ラウンド ${round})`);
@@ -270,7 +285,12 @@ export default function Home() {
 				intervalMs,
 			);
 			if (stopRef.current) break;
-			addMessage(chatHistory, negativeResponse, "否定派", "negative");
+			addMessage(
+				chatHistory,
+				negativeResponse,
+				`否定派 [R${round}]`,
+				"negative",
+			);
 
 			// 合意確認
 			setCurrentRole(`合意確認 (ラウンド ${round})`);
@@ -280,7 +300,12 @@ export default function Home() {
 				intervalMs,
 			);
 			if (stopRef.current) break;
-			addMessage(chatHistory, consensusResponse, "合意確認", "consensus");
+			addMessage(
+				chatHistory,
+				consensusResponse,
+				`合意確認 [R${round}]`,
+				"consensus",
+			);
 
 			// 合意達成チェック
 			if (consensusResponse.includes("[合意達成]")) {
@@ -416,7 +441,7 @@ export default function Home() {
 									<input
 										type="number"
 										min={1}
-										max={10}
+										max={100}
 										value={loopCount}
 										onChange={(e) => setLoopCount(Number(e.target.value))}
 										className="w-16 p-1 border rounded text-sm"
