@@ -64,17 +64,19 @@ export default function LogsPage() {
 					<div className="grid gap-4">
 						{files.map((file) => {
 							const { date, topic } = parseFilename(file);
+							const displayTopic = decodeURIComponent(topic.replace(/-/g, " "));
+							const path = `/logs/${file.replace(".json", "")}`;
 							return (
 								<Link
 									key={file}
-									href={`/logs/${file}`}
+									href={path}
 									className="block bg-white p-4 rounded-lg shadow hover:shadow-md transition-shadow border border-transparent hover:border-blue-300"
 								>
 									<div className="flex justify-between items-center">
 										<div>
 											<div className="text-sm text-gray-500 mb-1">{date}</div>
 											<div className="font-medium text-lg text-gray-800">
-												{topic}
+												{displayTopic}
 											</div>
 										</div>
 										<div className="text-blue-600 text-sm">詳細を見る →</div>
