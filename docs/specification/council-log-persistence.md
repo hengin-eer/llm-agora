@@ -70,19 +70,19 @@ interface CouncilLog {
   - Success: `{ success: true, filename: "..." }`
   - Error: `{ success: false, error: "..." }`
 
-## 4. インポート機能 (復元/プレビュー)
+## 4. インポート機能 (閲覧/プレビュー)
 
 ### 4.1. UI/UX
-- **ログ一覧**: 保存されたログファイルの一覧を表示する機能（将来実装）。
-- **読み込み**:
-  - 現段階では、開発者がファイルを指定するか、簡易的なファイルアップロード/選択UIを通じてJSONを読み込む。
-  - または、`docs/council-logs` 内のファイルを一覧取得するAPIを用意し、クライアントで選択可能にする。
+- **専用閲覧ページ**: メインの議論画面とは別に、ログ閲覧専用のページを作成する。
+  - 一覧ページ: `/logs` - 保存されたログファイルの一覧を表示。
+  - 詳細ページ: `/logs/[filename]` - 選択したログの内容を再生/表示。
+- **コンポーネント再利用**: メッセージ表示部分 (`Message` コンポーネントや `MarkdownPreview` 等) はメイン画面と共通化して利用する。
 
 ### 4.2. 処理フロー
-1. **ファイル取得**: サーバーからログファイルの内容を取得 (`GET /api/council-logs/[filename]`)。
-2. **状態復元**: 取得した `CouncilLog` データを、ReactのState (`setMessages`, `setTopic`, `setDebateMode` 等) に適用。
-3. **プレビュー**: チャット画面が更新され、過去の議論が表示される。
-   - ※この際、新たなAPIリクエストが発生しないように注意する（あくまで閲覧モード）。
+1. **一覧表示**: ユーザーが `/logs` にアクセスすると、`GET /api/council-logs` を呼び出し、ファイル一覧を表示する。
+2. **詳細表示**: ユーザーがファイルを選択すると、`/logs/[filename]` に遷移。
+3. **データ取得**: 詳細ページで `GET /api/council-logs/[filename]` を呼び出し、ログデータを取得。
+4. **レンダリング**: 取得したデータを元に、議論の様子を再現表示する（読み取り専用モード）。
 
 ### 4.3. API設計 (Import/List)
 - **List Endpoint**: `GET /api/council-logs`
@@ -92,7 +92,12 @@ interface CouncilLog {
 
 ## 5. 実装ステップ
 
-1. **API実装**: `src/app/api/council-logs/route.ts` (POST/GET) の作成。
-2. **Slug生成ロジック**: LLMを利用した実装。
-3. **クライアント実装**: `src/app/page.tsx` に保存ロジックを追加（議論終了時）。
-4. **インポートUI**: 簡易的なログ選択・読み込み機能の追加。
+1. **API実装**:
+   - `src/app/api/council-logs/route.ts` (POST/GET) - 実装済み
+   - `src/app/api/council-logs/[filename]/route.ts` (GET) - 新規作成
+2. **Slug生成ロジック**: 実装済み
+3. **クライアント実装 (保存)**: 実装済み
+4. **閲覧ページ実装**:
+   - `src/app/logs/page.tsx` (一覧)
+   - `src/app/logs/[filename]/page.tsx` (詳細)
+   - 共通コンポーネントの切り出し (必要に応じて `src/app/page.tsx` から抽出)
