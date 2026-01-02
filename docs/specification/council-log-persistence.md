@@ -29,7 +29,7 @@ interface Message {
 
 interface CouncilLog {
   // メタデータ
-  id: string;           // UUID v4
+  id: string;           // UUID v7
   version: string;      // スキーマバージョン (初期値: "1.0.0")
   topic: string;        // 議題 (ユーザー入力)
   startTime: string;    // 開始時刻 (ISO 8601)
@@ -57,7 +57,7 @@ interface CouncilLog {
 
 ### 3.2. 処理フロー
 1. **終了検知**: クライアントサイドで議論終了を検知。
-2. **Slug生成**: 議題 (`topic`) を元に、LLMまたは変換ロジックを用いて英語のSlugを生成する。
+2. **Slug生成**: 議題 (`topic`) を元に、LLMを用いて英語のSlugを生成する。
    - 例: "AIの権利について" -> "ai-rights"
 3. **データ構築**: 現在のState (`messages`, `mode`, `settings` 等) から `CouncilLog` オブジェクトを生成。
 4. **API送信**: `POST /api/council-logs` にJSONデータを送信。
@@ -93,6 +93,6 @@ interface CouncilLog {
 ## 5. 実装ステップ
 
 1. **API実装**: `src/app/api/council-logs/route.ts` (POST/GET) の作成。
-2. **Slug生成ロジック**: 簡易的な翻訳またはLLM利用の実装。
+2. **Slug生成ロジック**: LLMを利用した実装。
 3. **クライアント実装**: `src/app/page.tsx` に保存ロジックを追加（議論終了時）。
 4. **インポートUI**: 簡易的なログ選択・読み込み機能の追加。
