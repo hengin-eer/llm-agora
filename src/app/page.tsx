@@ -162,6 +162,7 @@ export default function Home() {
 		content: string,
 		roleName: string,
 		roleKey: string,
+		fullHistory: Message[], // 追加: 保存用の完全な履歴配列
 	) => {
 		const aiMessage: Message = {
 			id: `ai-${roleKey}-${Date.now()}-${Math.random()}`,
@@ -171,6 +172,7 @@ export default function Home() {
 		};
 		setMessages((prev) => [...prev, aiMessage]);
 		chatHistory.push({ role: "assistant", content });
+		fullHistory.push(aiMessage); // 追加
 	};
 
 	/**
@@ -179,6 +181,7 @@ export default function Home() {
 	 */
 	const runFixedMode = async (
 		chatHistory: ChatMessage[],
+		fullHistory: Message[],
 		intervalMs: number,
 	) => {
 		const roles = [
@@ -203,7 +206,13 @@ export default function Home() {
 			);
 
 			if (stopRef.current) break;
-			addMessage(chatHistory, response, `${role.name} [T${i + 1}]`, role.key);
+			addMessage(
+				chatHistory,
+				response,
+				`${role.name} [T${i + 1}]`,
+				role.key,
+				fullHistory,
+			);
 		}
 	};
 
@@ -213,6 +222,7 @@ export default function Home() {
 	 */
 	const runLoopMode = async (
 		chatHistory: ChatMessage[],
+		fullHistory: Message[],
 		intervalMs: number,
 	) => {
 		// 最初にファシリテーター
@@ -229,6 +239,7 @@ export default function Home() {
 					facilitatorResponse,
 					"ファシリテーター",
 					"facilitator",
+					fullHistory,
 				);
 			}
 		}
@@ -250,6 +261,7 @@ export default function Home() {
 				positiveResponse,
 				`肯定派 [R${i + 1}]`,
 				"positive",
+				fullHistory,
 			);
 
 			// 否定派
@@ -265,6 +277,7 @@ export default function Home() {
 				negativeResponse,
 				`否定派 [R${i + 1}]`,
 				"negative",
+				fullHistory,
 			);
 		}
 	};
@@ -276,6 +289,7 @@ export default function Home() {
 	 */
 	const runConsensusMode = async (
 		chatHistory: ChatMessage[],
+		fullHistory: Message[],
 		intervalMs: number,
 	) => {
 		const maxRounds = 10;
@@ -294,6 +308,7 @@ export default function Home() {
 					facilitatorResponse,
 					"ファシリテーター",
 					"facilitator",
+					fullHistory,
 				);
 			}
 		}
@@ -314,6 +329,7 @@ export default function Home() {
 				positiveResponse,
 				`肯定派 [R${round}]`,
 				"positive",
+				fullHistory,
 			);
 
 			// 否定派
@@ -329,6 +345,7 @@ export default function Home() {
 				negativeResponse,
 				`否定派 [R${round}]`,
 				"negative",
+				fullHistory,
 			);
 
 			// 合意確認
@@ -344,6 +361,7 @@ export default function Home() {
 				consensusResponse,
 				`合意確認 [R${round}]`,
 				"consensus",
+				fullHistory,
 			);
 
 			// 合意達成チェック
@@ -364,6 +382,7 @@ export default function Home() {
 	 */
 	const runMultifacetedMode = async (
 		chatHistory: ChatMessage[],
+		fullHistory: Message[],
 		intervalMs: number,
 	) => {
 		// 最初にファシリテーター
@@ -380,6 +399,7 @@ export default function Home() {
 					facilitatorResponse,
 					"ファシリテーター",
 					"facilitator",
+					fullHistory,
 				);
 			}
 		}
@@ -399,7 +419,13 @@ export default function Home() {
 				);
 
 				if (stopRef.current) break;
-				addMessage(chatHistory, response, `${role.name} [R${i + 1}]`, role.key);
+				addMessage(
+					chatHistory,
+					response,
+					`${role.name} [R${i + 1}]`,
+					role.key,
+					fullHistory,
+				);
 			}
 		}
 	};
@@ -419,6 +445,7 @@ export default function Home() {
 		stopRef.current = false;
 
 		const chatHistory: ChatMessage[] = [];
+		const fullHistory: Message[] = []; // 保存用
 
 		try {
 			// ユーザーメッセージを追加
@@ -430,26 +457,73 @@ export default function Home() {
 			};
 			setMessages([userMessage]);
 			chatHistory.push({ role: "user", content: topic });
+			fullHistory.push(userMessage);
 
 			const intervalMs = minInterval * 1000;
 
 			// モードに応じて実行
 			switch (debateMode) {
 				case "fixed":
-					await runFixedMode(chatHistory, intervalMs);
+					await runFixedMode(chatHistory, fullHistory, intervalMs);
 					break;
 				case "loop":
-					await runLoopMode(chatHistory, intervalMs);
+					await runLoopMode(chatHistory, fullHistory, intervalMs);
 					break;
 				case "consensus":
-					await runConsensusMode(chatHistory, intervalMs);
+					await runConsensusMode(chatHistory, fullHistory, intervalMs);
 					break;
 				case "multifaceted":
-					await runMultifacetedMode(chatHistory, intervalMs);
+					await runMultifacetedMode(chatHistory, fullHistory, intervalMs);
 					break;
 			}
 
 			console.log("=== 議論完了 ===");
+
+			// 議論終了時にログを保存
+			if (!stopRef.current) {
+				try {
+					setCurrentRole("ログ保存中...");
+
+					// 1. Slug生成
+					const slugRes = await fetch("/api/slug", {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({ topic }),
+					});
+					const { slug } = await slugRes.json();
+
+					// 2. ログ保存
+					const logData = {
+						topic,
+						startTime: new Date().toISOString(), // 簡易的に現在時刻（本来は開始時刻を保持すべき）
+						mode: debateMode,
+						settings: {
+							turnCount: debateMode === "fixed" ? turnCount : undefined,
+							loopCount: debateMode !== "fixed" ? loopCount : undefined,
+							selectedRoles:
+								debateMode === "multifaceted"
+									? selectedRoles.map((r) => r.key)
+									: undefined,
+							minInterval,
+						},
+						messages: fullHistory,
+					};
+
+					const saveRes = await fetch("/api/council-logs", {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({ ...logData, slug }),
+					});
+
+					if (saveRes.ok) {
+						console.log("✅ ログ保存完了");
+					} else {
+						alert("ログ保存失敗");
+					}
+				} catch (saveErr) {
+					alert(`ログ保存エラー: ${saveErr}`);
+				}
+			}
 		} catch (err) {
 			console.error("Error:", err);
 			setError(String(err));
