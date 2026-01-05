@@ -1,31 +1,40 @@
 {
-	"name": "llm-agora",
-	"version": "0.1.0",
-	"private": true,
-	"scripts": {
-		"dev": "next dev --turbopack",
-		"build": "next build",
-		"start": "next start",
-		"lint": "next lint",
-		"format": "npx @biomejs/biome check --write"
-	},
-	"dependencies": {
-		"@ai-sdk/google": "^1.2.11",
-		"@ai-sdk/openai": "^1.3.16",
-		"@ai-sdk/react": "^1.2.9",
-		"@executeautomation/playwright-mcp-server": "^1.0.6",
-		"ai": "^4.3.9",
-		"next": "15.3.1",
-		"react": "^19.0.0",
-		"react-dom": "^19.0.0"
-	},
-	"devDependencies": {
-		"@biomejs/biome": "1.9.4",
-		"@tailwindcss/postcss": "^4",
-		"@types/node": "^20",
-		"@types/react": "^19",
-		"@types/react-dom": "^19",
-		"tailwindcss": "^4",
-		"typescript": "^5"
-	}
+  "name": "llm-agora",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --turbopack",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "format": "npx @biomejs/biome check --write"
+  },
+  "dependencies": {
+    "@ai-sdk/google": "^1.2.11",
+    "@ai-sdk/openai": "^1.3.16",
+    "@ai-sdk/react": "^1.2.9",
+    "@executeautomation/playwright-mcp-server": "^1.0.6",
+    "ai": "^4.3.9",
+    "next": "16.1.1",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "uuidv7": "^1.1.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "1.9.4",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "eslint": "^9.39.2",
+    "eslint-config-next": "^16.1.1",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  },
+  "overrides": {
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3"
+  }
 }

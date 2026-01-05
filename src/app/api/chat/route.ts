@@ -41,7 +41,7 @@ export async function POST(req: Request) {
 
 		// generateTextを使用
 		const result = await generateText({
-			model: google("gemini-2.0-flash-001", {
+			model: google("gemini-2.5-flash", {
 				// セーフティ設定を緩和
 				safetySettings: [
 					{
