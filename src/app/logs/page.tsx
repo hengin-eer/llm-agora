@@ -73,7 +73,7 @@ export default function LogsPage() {
 												{displayTopic}
 											</div>
 										</div>
-										<div className="text-blue-600 text-sm">詳細を見る →</div>
+										<div className="text-blue-600 text-sm">詳細を見る</div>
 									</div>
 								</Link>
 							);

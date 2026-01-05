@@ -71,7 +71,7 @@ export default function LogDetailPage({
 						{error || "ログが見つかりません"}
 					</div>
 					<Link href="/logs" className="text-blue-600 hover:underline">
-						← 一覧に戻る
+						一覧に戻る
 					</Link>
 				</div>
 			</div>
@@ -86,7 +86,7 @@ export default function LogDetailPage({
 						href="/logs"
 						className="text-sm text-gray-500 hover:text-gray-700 mb-2 inline-block"
 					>
-						← 一覧に戻る
+						一覧に戻る
 					</Link>
 					<h1 className="text-2xl font-bold mb-2">{log.topic}</h1>
 					<div className="flex gap-4 text-sm text-gray-500">
