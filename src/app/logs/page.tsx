@@ -44,12 +44,6 @@ export default function LogsPage() {
 			<div className="max-w-4xl mx-auto">
 				<div className="flex justify-between items-center mb-6">
 					<h1 className="text-2xl font-bold">議論ログ一覧</h1>
-					<Link
-						href="/"
-						className="text-blue-600 hover:text-blue-800 hover:underline"
-					>
-						← 新しい議論を開始
-					</Link>
 				</div>
 
 				{isLoading ? (

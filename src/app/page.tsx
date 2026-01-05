@@ -544,8 +544,6 @@ export default function Home() {
 	return (
 		<div className="min-h-screen bg-gray-50 p-8">
 			<div className="max-w-2xl mx-auto">
-				<h1 className="text-2xl font-bold mb-6">LLM Agora - 議論システム</h1>
-
 				{/* 入力エリア */}
 				<div className="bg-white p-4 rounded-lg shadow mb-6">
 					<textarea
