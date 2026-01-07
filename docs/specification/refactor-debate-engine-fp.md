@@ -1,37 +1,67 @@
-# リファクタリング仕様書: 関数型アプローチによるDebate Engine
+# リファクタリング仕様書: 関数型アプローチとAsync GeneratorによるDebate Engine
 
-## 1. 概要
-`src/app/page.tsx` に記述されている議論ロジック（Fixed Mode, Dynamic Mode等）を、関数型プログラミング（FP）のアプローチを用いてリファクタリングする。
-高階関数（Higher-Order Functions）とカリー化を活用し、副作用（APIコール/UI更新）と純粋なロジック（プロンプト構築/次話者決定）を分離することで、テスト容易性と拡張性を高める。
+## 1. 背景と目的
 
-## 2. アーキテクチャ
+### 現状の課題
+現在の `src/app/page.tsx` は、議論の進行ロジック、UI描画、API通信、状態管理が密結合した「モノリシック」な構造になっています。
+特に、`runFixedMode` などの関数内で非同期処理(`callAPI`)と状態更新(`setMessages`)が混在しており、以下の問題が発生しています。
 
-### 2.1 ディレクトリ構造
-`src/lib/debate/` 配下にロジックを集約する。
+1.  **Push型（コールバック方式）の弊害**: ロジックの中からUI更新関数を直接呼び出すため、Reactのレンダリングサイクルとの整合性を保つのが難しく、中断機能(`stopRef`)の実装も複雑化しています。
+2.  **拡張性の欠如**: 新しい議論モードを追加するには、巨大な条件分岐を増やす必要があり、既存機能への影響範囲が見えにくくなっています。
+3.  **責務の混在**: 「誰が次に話すか（純粋なルール）」と「実際にAPIを叩いて答えを得る（副作用）」が混ざっており、ユニットテストが困難です。
+
+### リファクタリングの方針
+これらの課題を解決するため、**「Functional Core, Imperative Shell（関数型のコア、命令型のシェル）」** のアーキテクチャを採用し、議論エンジンを再構築します。
+また、Reactとの親和性を高めるため、実行エンジンには **「Generator Pattern（Pull型）」** を導入します。
+
+---
+
+## 2. コア・コンセプト
+
+### A. Functional Core（純粋なルール）
+議論の「ルール」や「モード」は、副作用を持たない **純粋関数 (Pure Functions)** として定義します。
+「現在の会話履歴」を入力とし、「次に誰が話すべきか」「どんなプロンプトを使うか」を出力します。API通信や時間は扱いません。
+
+### B. Imperative Shell（実行エンジン）
+API通信や時間の経過といった「副作用」は、**Async Generator** を用いた `runner.ts` が一手に引き受けます。
+Generatorは、新しいメッセージや状態変化が発生するたびに値を `yield` します。
+
+### C. Pull型アーキテクチャ（Reactコンシューマー）
+UI側（React）は、Generatorから流れてくる値を `for await...of` ループで受け取ります。
+これにより、UIは「いつ描画するか」「いつ中断するか」の主導権を握ることができます。
+
+---
+
+## 3. ディレクトリ構造
+
+`src/lib/debate/` 配下にロジックを集約します。
 
 ```
 src/lib/debate/
 ├── types.ts            # 型定義（共通インターフェース）
-├── actions.ts          # 副作用を伴う処理（LLM API呼び出し）
-├── role-definitions.ts # ロール定義と専用プロンプト
-├── runner.ts           # 実行エンジン
-└── modes/              # 議論モードごとのロジック定義
+├── actions.ts          # 副作用の実装（API Route呼び出し）
+├── role-definitions.ts # 【Data】ロール定義と専用プロンプト（Single Source of Truth）
+├── runner.ts           # 【Shell】実行エンジン（Async Generator）
+└── modes/              # 【Core】議論モードごとの純粋ルール定義
     ├── index.ts        # 各モードのエクスポート
     ├── fixed.ts        # 回数指定モード
     ├── loop.ts         # ループモード
     └── consensus.ts    # 合意達成モード
 ```
 
-汎用的なプロンプトは `src/lib/llm/prompts.ts` に残しつつ、議論モード固有のロール定義プロンプトはこのディレクトリ内で管理する。
+---
 
-### 2.2 モジュール詳細
+## 4. モジュール詳細仕様
 
-#### A. 型定義 (`types.ts`)
-議論の状態やモードを厳格に型定義する。
+### 4.1 型定義 (`types.ts`)
+
+議論の状態や、各モードが実装すべきインターフェースを定義します。
 
 ```typescript
-export type Role = 'facilitator' | 'positive' | 'negative' | 'user';
+// 役割の定義
+export type Role = 'facilitator' | 'positive' | 'negative' | 'user' | string;
 
+// メッセージ構造
 export interface Message {
   role: Role;
   content: string;
@@ -39,6 +69,7 @@ export interface Message {
   timestamp: number;
 }
 
+// 議論の文脈（入力データ）
 export interface DebateContext {
   topic: string;
   messages: Message[];
@@ -46,54 +77,44 @@ export interface DebateContext {
   totalRounds: number;
 }
 
-// 議論の進行ルールを定義する関数型（旧 Strategy）
+// 純粋関数としてのルール定義（旧 Strategy）
 export type RoleSelector = (context: DebateContext) => Role | null;
 export type PromptBuilder = (context: DebateContext, nextSpeaker: Role) => string;
 
-// 各モードが実装すべきインターフェース
+// すべての議論モードが満たすべき契約
 export interface DebateModeDefinition {
+  name: string;
   init?: (context: DebateContext) => DebateContext;
-  selectNextSpeaker: RoleSelector;
-  buildPrompt: PromptBuilder;
+  selectNextSpeaker: RoleSelector; // 次は誰？
+  buildPrompt: PromptBuilder;      // その人に何と言わせる？
 }
 ```
 
-#### B. 議論モード定義 (`modes/*.ts`)
-議論のモードごとの振る舞いを高階関数として定義する。
-各モードは `DebateModeDefinition` インターフェースを満たすオブジェクトを生成する関数を提供する。
+### 4.2 ロール定義 (`role-definitions.ts`)
 
-*   **Fixed Mode (`modes/fixed.ts`)**:
-    *   `createFixedMode(order: Role[])`: 事前定義された順序リストに基づき話者を決定するモード定義を返す。
-*   **Loop Mode (`modes/loop.ts`)**:
-    *   肯定・否定をループさせるロジックを定義。
-*   **Consensus Mode (`modes/consensus.ts`)**:
-    *   合意形成に至るまでの動的なロール切り替えを定義。
+現在 `page.tsx` に散在している `SYSTEM_PROMPTS` や `DEBATE_ROLES` を一元管理します。
+ここを修正すれば、アプリケーション全体のペルソナが変更される「Single Source of Truth」とします。
 
-#### C. 副作用モジュール (`actions.ts`)
-Next.jsのServer Actions、またはClientからのAPI Route呼び出しをカプセル化する。
+### 4.3 議論モード (`modes/*.ts`)
 
-```typescript
-export const callChatApi = async (messages: Message[]): Promise<string> => {
-  // src/app/api/chat/route.ts へのfetch処理
-};
-```
+各ファイルは `DebateModeDefinition` を返す関数をエクスポートします。
+これらは完全にロジックのみを記述し、API呼び出しなどは含みません。
 
-#### D. 実行エンジン (`runner.ts`)
-**Async Generator (非同期ジェネレータ)** を採用し、Pull型のアーキテクチャに変更する。
+*   **Fixed Mode**: 配列で定義された順序を単純に返すロジック。
+*   **Loop Mode**: 現在のラウンド数を見て、肯定/否定を切り替えるロジック。
+*   **Consensus Mode**: 合意形成フェーズかどうかを判定し、話者を決定する条件分岐ロジック。
 
-**【改善の背景】**
-現在の実装は、`runFixedMode` 関数内で `callAPI` を呼び出し、結果が出るたびに `addMessage` (ReactのState更新関数) を呼び出す **「Push型（コールバック方式）」** になっています。
-このアプローチには、Reactコンポーネントとの結合度が高く、処理の中断（Stopボタン）制御が複雑になる（`stopRef`などの参照渡しが必要）という課題があります。
+### 4.4 実行エンジン (`runner.ts`)
 
-**【新しいアプローチ: Pull型】**
-Generator関数を採用することで、**「値が生成されるたびに呼び出し元がそれを取りに行く」** アーキテクチャに変更します。
-これにより、中断処理は単にループを抜ける(`break`)だけで済み、副作用の制御権をUIコンポーネント側に取り戻すことができます。
+**本リファクタリングの核となる部分です。**
+Generator関数として実装され、反復可能なストリームを提供します。
 
 ```typescript
-// 具体的な出力の方針は検討が必要だが、基本は更新されたMessageやStatusをyieldする
+// UIへ通知するイベントの種類
 export type DebateYield =
-  | { type: 'message'; message: Message }
-  | { type: 'status'; status: 'thinking' | 'waiting' };
+  | { type: 'message'; message: Message }       // 新しい発言があった
+  | { type: 'status'; status: 'thinking' | 'waiting' | string } // 考え中などの状態遷移
+  | { type: 'finish'; reason: string };         // 議論終了
 
 export async function* runDebate(
   initialContext: DebateContext,
@@ -102,45 +123,101 @@ export async function* runDebate(
     generateResponse: (prompt: string) => Promise<string>;
   }
 ): AsyncGenerator<DebateYield, void, unknown> {
-  // 1. ループ開始
-  // 2. mode.selectNextSpeaker で次話者を決定
-  // 3. 終了ならreturn
-  // 4. mode.buildPrompt でプロンプト生成
-  // 5. API呼び出し (yield {type: 'status', ...} で途中経過も通知可)
-  // 6. 結果を yield {type: 'message', ...}
-  // 7. Context更新して次へ
-}
-```
+  let context = { ...initialContext };
 
-利用側（Component）は `for await...of` ループでこれを受け取る。
+  // 初期化があれば実行
+  if (mode.init) {
+    context = mode.init(context);
+  }
 
-```typescript
-// page.tsx での利用イメージ
-for await (const update of runDebate(context, mode, effects)) {
-  if (update.type === 'message') {
-    setMessages(prev => [...prev, update.message]);
+  while (true) {
+    // 1. 次の話者を決定（純粋関数）
+    const nextSpeaker = mode.selectNextSpeaker(context);
+    if (!nextSpeaker) {
+      yield { type: 'finish', reason: 'No more speakers' };
+      break;
+    }
+
+    // 2. プロンプト生成（純粋関数）
+    const prompt = mode.buildPrompt(context, nextSpeaker);
+
+    // 3. UIに「考え中」を通知
+    yield { type: 'status', status: `thinking:${nextSpeaker}` };
+
+    // 4. API呼び出し（副作用）
+    // NOTE: ここでエラーハンドリングや待機時間(sleep)も挟める
+    const responseContent = await effects.generateResponse(prompt);
+
+    // 5. メッセージオブジェクト構築
+    const newMessage: Message = {
+      role: nextSpeaker,
+      content: responseContent,
+      id: crypto.randomUUID(), // or uuidv7
+      timestamp: Date.now(),
+    };
+
+    // 6. UIにメッセージを通知
+    yield { type: 'message', message: newMessage };
+
+    // 7. コンテキスト更新
+    context.messages.push(newMessage);
+
+    // ループ継続...
   }
 }
 ```
 
-## 3. 既存コードの変更点
+### 4.5 コンシューマー (`src/app/page.tsx`)
 
-### 3.1 プロンプト管理のモジュール化
-現在 `page.tsx` に定義されている `SYSTEM_PROMPTS` や `DEBATE_ROLES` を、`src/lib/debate/role-definitions.ts` に移動しモジュール化する。
-これにより、議論モードや新しい参加者ロールを追加する際に、UIコンポーネント（`page.tsx`）を修正する必要がなくなり、構成とロジックが明確に分離される。
+View層はロジックを持たず、Generatorを回すだけのシンプルな構造になります。
+中断ボタンが押された場合、ループを `break` するだけで、安全に処理が停止します。
 
-### 3.2 `src/app/page.tsx`
-巨大な `useEffect` や `runFixedMode` 関数を削除し、`useDebate` フック（または直接的なハンドラ呼び出し）経由で `runner.ts` を利用する形に変更する。
-State管理だけを担当し、ロジックを持たない「View」に近い構成とする。
+```typescript
+const handleStart = async () => {
+  setIsRunning(true);
 
-## 4. 目標とするメリット
-1.  **拡張性**: 新しい議論モード（例: 自由討論モード）を追加する際、`modes/` に新しい定義ファイルを追加するだけで済む。
-2.  **可読性**: 制御フロー（`runner.ts`）とビジネスロジック（`modes/*.ts`）が分離され、コードの見通しが良くなる。
-3.  **保守性**: プロンプトが一箇所にまとまり、微調整が容易になる。
+  // Generatorを作成
+  const iterator = runDebate(context, selectedMode, { generateResponse: apiCall });
 
-## 5. 実装ステップ
-1.  **Step 1**: `src/lib/debate/role-definitions.ts` を作成し、`page.tsx` からロールとプロンプト定義を移行。
-2.  **Step 2**: `src/lib/debate/` ディレクトリ作成と `types.ts`, `actions.ts` 実装。
-3.  **Step 3**: `modes/` ディレクトリ作成と各モードロジックの実装。
-4.  **Step 4**: `runner.ts` の実装。
-5.  **Step 5**: `page.tsx` の書き換えと結合。
+  for await (const update of iterator) {
+    // ストップフラグのチェックもループ条件で行えるが、breakでもOK
+    if (!isRunningRef.current) break;
+
+    if (update.type === 'message') {
+      setMessages(prev => [...prev, update.message]);
+    } else if (update.type === 'status') {
+      // 誰が考え中かなども表示可能
+      setStatus(update.status);
+    }
+  }
+
+  setIsRunning(false);
+};
+```
+
+---
+
+## 5. 実装ロードマップ
+
+1.  **Step 1: データ移行**
+    *   `src/lib/debate/role-definitions.ts` を作成し、プロンプト定義を移動。
+2.  **Step 2: 基盤実装**
+    *   `types.ts` で型定義を作成。
+    *   `actions.ts` でAPI呼び出し関数を分離。
+3.  **Step 3: モード定義**
+    *   `modes/` ディレクトリを作成。
+    *   まず `fixed.ts` (Fixed Mode) を移植。
+4.  **Step 4: エンジン実装**
+    *   `src/lib/debate/runner.ts` を Async Generator として実装。
+5.  **Step 5: View結合**
+    *   `page.tsx` を修正し、新しいエンジンを使用するように書き換え。
+    *   古いロジックを削除。
+
+---
+
+## 6. 将来の拡張性
+このアーキテクチャにすることで、将来以下のような機能追加が容易になります。
+
+*   **ステップ実行機能**: Generatorは `next()` を呼ぶまで止まっているため、「次の発言を表示」ボタンの実装が容易。
+*   **分岐シミュレーション**: `runDebate` を途中の Context から開始すれば、そこから別の議論を展開可能。
+*   **テスト自動化**: `modes/*.ts` は純粋関数なので、API無しでロジックの単体テストが可能。
