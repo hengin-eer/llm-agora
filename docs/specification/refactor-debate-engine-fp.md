@@ -11,11 +11,15 @@
 
 ```
 src/lib/debate/
-├── types.ts            # 型定義（Discriminated Unions等）
+├── types.ts            # 型定義（共通インターフェース）
 ├── actions.ts          # 副作用を伴う処理（LLM API呼び出し）
-├── strategies.ts       # 議論進行戦略（高階関数群）
+├── role-definitions.ts # ロール定義と専用プロンプト
 ├── runner.ts           # 実行エンジン
-└── role-definitions.ts # ロール定義と専用プロンプト（新規）
+└── modes/              # 議論モードごとのロジック定義
+    ├── index.ts        # 各モードのエクスポート
+    ├── fixed.ts        # 回数指定モード
+    ├── loop.ts         # ループモード
+    └── consensus.ts    # 合意達成モード
 ```
 
 汎用的なプロンプトは `src/lib/llm/prompts.ts` に残しつつ、議論モード固有のロール定義プロンプトはこのディレクトリ内で管理する。
@@ -42,19 +46,28 @@ export interface DebateContext {
   totalRounds: number;
 }
 
-// 議論の進行戦略を定義する関数型
-export type NextSpeakerStrategy = (context: DebateContext) => Role | null;
-export type PromptStrategy = (context: DebateContext, nextSpeaker: Role) => string;
+// 議論の進行ルールを定義する関数型（旧 Strategy）
+export type RoleSelector = (context: DebateContext) => Role | null;
+export type PromptBuilder = (context: DebateContext, nextSpeaker: Role) => string;
+
+// 各モードが実装すべきインターフェース
+export interface DebateModeDefinition {
+  init?: (context: DebateContext) => DebateContext;
+  selectNextSpeaker: RoleSelector;
+  buildPrompt: PromptBuilder;
+}
 ```
 
-#### B. 戦略モジュール (`strategies.ts`)
-議論のモードごとの振る舞いを高階関数として定義する。これらは「純粋関数」であることを目指す。
+#### B. 議論モード定義 (`modes/*.ts`)
+議論のモードごとの振る舞いを高階関数として定義する。
+各モードは `DebateModeDefinition` インターフェースを満たすオブジェクトを生成する関数を提供する。
 
-*   **Speaker Selection Strategies**: 次に誰が話すべきかを決定する。
-    *   `createFixedOrderStrategy(order: Role[])`: 事前定義された順序で話者を決定する高階関数。
-    *   `dynamicSelectionStrategy`: 文脈に基づいて動的に決定する（今回は簡易実装または将来拡張）。
-*   **Prompt Factory Strategies**: 文脈に応じたプロンプトを生成する。
-    *   `createDebatePromptStrategy(instructions: Record<Role, string>)`: 役割ごとの指示書に基づきプロンプトを生成。
+*   **Fixed Mode (`modes/fixed.ts`)**:
+    *   `createFixedMode(order: Role[])`: 事前定義された順序リストに基づき話者を決定するモード定義を返す。
+*   **Loop Mode (`modes/loop.ts`)**:
+    *   肯定・否定をループさせるロジックを定義。
+*   **Consensus Mode (`modes/consensus.ts`)**:
+    *   合意形成に至るまでの動的なロール切り替えを定義。
 
 #### C. 副作用モジュール (`actions.ts`)
 Next.jsのServer Actions、またはClientからのAPI Route呼び出しをカプセル化する。
@@ -66,30 +79,41 @@ export const callChatApi = async (messages: Message[]): Promise<string> => {
 ```
 
 #### D. 実行エンジン (`runner.ts`)
-再帰的、あるいはループ処理によって議論を進行させるメイン関数。
-UIコンポーネントはこの関数を呼び出し、コールバックで状態更新を受け取る。
+**Async Generator (非同期ジェネレータ)** を採用し、Pull型のアーキテクチャに変更する。
+これにより、UI側（React）での状態更新や処理の中断（`break`）が容易かつ安全になる。
 
 ```typescript
-type StateUpdater = (newMessage: Message) => void;
+// 具体的な出力の方針は検討が必要だが、基本は更新されたMessageやStatusをyieldする
+export type DebateYield = 
+  | { type: 'message'; message: Message }
+  | { type: 'status'; status: 'thinking' | 'waiting' };
 
-export const runDebate = async (
+export async function* runDebate(
   initialContext: DebateContext,
-  strategies: {
-    nextSpeaker: NextSpeakerStrategy;
-    promptFactory: PromptStrategy;
-  },
+  mode: DebateModeDefinition,
   effects: {
     generateResponse: (prompt: string) => Promise<string>;
-    onMessage: StateUpdater;
   }
-) => {
-  // 1. NextSpeaker戦略を実行
-  // 2. 終了条件判定
-  // 3. Prompt戦略を実行
-  // 4. 副作用（APIコール）実行
-  // 5. State更新
-  // 6. 再帰呼び出し or 終了
-};
+): AsyncGenerator<DebateYield, void, unknown> {
+  // 1. ループ開始
+  // 2. mode.selectNextSpeaker で次話者を決定
+  // 3. 終了ならreturn
+  // 4. mode.buildPrompt でプロンプト生成
+  // 5. API呼び出し (yield {type: 'status', ...} で途中経過も通知可)
+  // 6. 結果を yield {type: 'message', ...}
+  // 7. Context更新して次へ
+}
+```
+
+利用側（Component）は `for await...of` ループでこれを受け取る。
+
+```typescript
+// page.tsx での利用イメージ
+for await (const update of runDebate(context, mode, effects)) {
+  if (update.type === 'message') {
+    setMessages(prev => [...prev, update.message]);
+  }
+}
 ```
 
 ## 3. 既存コードの変更点
@@ -103,13 +127,13 @@ export const runDebate = async (
 State管理だけを担当し、ロジックを持たない「View」に近い構成とする。
 
 ## 4. 目標とするメリット
-1.  **拡張性**: 新しい議論モード（例: 自由討論モード）を追加する際、`NextSpeakerStrategy` を差し替えるだけで済む。
-2.  **可読性**: 制御フロー（`runner.ts`）とビジネスロジック（`strategies.ts`）が分離され、コードの見通しが良くなる。
+1.  **拡張性**: 新しい議論モード（例: 自由討論モード）を追加する際、`modes/` に新しい定義ファイルを追加するだけで済む。
+2.  **可読性**: 制御フロー（`runner.ts`）とビジネスロジック（`modes/*.ts`）が分離され、コードの見通しが良くなる。
 3.  **保守性**: プロンプトが一箇所にまとまり、微調整が容易になる。
 
 ## 5. 実装ステップ
 1.  **Step 1**: `src/lib/debate/role-definitions.ts` を作成し、`page.tsx` からロールとプロンプト定義を移行。
 2.  **Step 2**: `src/lib/debate/` ディレクトリ作成と `types.ts`, `actions.ts` 実装。
-3.  **Step 3**: `strategies.ts` の実装（Fixed Modeのロジック移植）。
+3.  **Step 3**: `modes/` ディレクトリ作成と各モードロジックの実装。
 4.  **Step 4**: `runner.ts` の実装。
 5.  **Step 5**: `page.tsx` の書き換えと結合。
