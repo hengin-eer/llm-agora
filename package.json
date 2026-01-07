@@ -3,11 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack",
-    "build": "next build",
+    "dev": "node scripts/prepare-logs.mjs && next dev --turbopack",
+    "build": "node scripts/prepare-logs.mjs && next build",
     "start": "next start",
     "lint": "eslint .",
-    "format": "npx @biomejs/biome check --write"
+    "format": "npx @biomejs/biome check --write",
+    "prepare-logs": "node scripts/prepare-logs.mjs"
   },
   "dependencies": {
     "@ai-sdk/google": "^1.2.11",
@@ -15,6 +16,7 @@
     "@ai-sdk/react": "^1.2.9",
     "@executeautomation/playwright-mcp-server": "^1.0.6",
     "ai": "^4.3.9",
+    "lucide-react": "^0.562.0",
     "next": "16.1.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
