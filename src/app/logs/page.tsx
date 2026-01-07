@@ -11,7 +11,8 @@ export default function LogsPage() {
 	useEffect(() => {
 		const fetchLogs = async () => {
 			try {
-				const res = await fetch("/api/council-logs");
+				// 静的ファイルから読み込み（本番・開発共通）
+				const res = await fetch("/council-logs/index.json");
 				if (!res.ok) throw new Error("Failed to fetch logs");
 				const data = await res.json();
 				setFiles(data.files);

@@ -37,7 +37,8 @@ export default function LogDetailPage({
 				const safeFilename = filename.endsWith(".json")
 					? filename
 					: `${filename}.json`;
-				const res = await fetch(`/api/council-logs/${safeFilename}`);
+				// 静的ファイルから読み込み（本番・開発共通）
+				const res = await fetch(`/council-logs/${safeFilename}`);
 
 				if (!res.ok) {
 					if (res.status === 404) throw new Error("ログが見つかりません");
