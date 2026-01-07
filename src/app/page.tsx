@@ -1,6 +1,7 @@
 "use client";
 
 import MessageComponent from "@/components/Message";
+import { PreviewOnlyNotice } from "@/components/PreviewOnlyNotice";
 import { callChatApi } from "@/lib/debate/actions";
 import { createConsensusMode } from "@/lib/debate/modes/consensus";
 import { createFixedMode } from "@/lib/debate/modes/fixed";
@@ -19,12 +20,24 @@ import type {
 } from "@/lib/debate/types";
 import { useRef, useState } from "react";
 
+// 本番環境かどうかを判定
+const isProduction = process.env.NEXT_PUBLIC_PREVIEW_ONLY === "true";
+
 type DebateMode = "fixed" | "loop" | "consensus" | "multifaceted";
 
 // 最低待機時間を保証するsleep関数
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export default function Home() {
+	// 本番環境ではプレビュー専用UIを表示
+	if (isProduction) {
+		return <PreviewOnlyNotice />;
+	}
+
+	return <DebatePage />;
+}
+
+function DebatePage() {
 	const [topic, setTopic] = useState("");
 	const [messages, setMessages] = useState<Message[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
