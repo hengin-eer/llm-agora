@@ -80,11 +80,18 @@ export const callChatApi = async (messages: Message[]): Promise<string> => {
 
 #### D. 実行エンジン (`runner.ts`)
 **Async Generator (非同期ジェネレータ)** を採用し、Pull型のアーキテクチャに変更する。
-これにより、UI側（React）での状態更新や処理の中断（`break`）が容易かつ安全になる。
+
+**【改善の背景】**
+現在の実装は、`runFixedMode` 関数内で `callAPI` を呼び出し、結果が出るたびに `addMessage` (ReactのState更新関数) を呼び出す **「Push型（コールバック方式）」** になっています。
+このアプローチには、Reactコンポーネントとの結合度が高く、処理の中断（Stopボタン）制御が複雑になる（`stopRef`などの参照渡しが必要）という課題があります。
+
+**【新しいアプローチ: Pull型】**
+Generator関数を採用することで、**「値が生成されるたびに呼び出し元がそれを取りに行く」** アーキテクチャに変更します。
+これにより、中断処理は単にループを抜ける(`break`)だけで済み、副作用の制御権をUIコンポーネント側に取り戻すことができます。
 
 ```typescript
 // 具体的な出力の方針は検討が必要だが、基本は更新されたMessageやStatusをyieldする
-export type DebateYield = 
+export type DebateYield =
   | { type: 'message'; message: Message }
   | { type: 'status'; status: 'thinking' | 'waiting' };
 
