@@ -1,144 +1,35 @@
 "use client";
 
-import { MarkdownPreview } from "@/components/MarkdownPreview";
+import MessageComponent from "@/components/Message";
+import { callChatApi } from "@/lib/debate/actions";
+import { createConsensusMode } from "@/lib/debate/modes/consensus";
+import { createFixedMode } from "@/lib/debate/modes/fixed";
+import { createLoopMode } from "@/lib/debate/modes/loop";
+import { createMultifacetedMode } from "@/lib/debate/modes/multifaceted";
+import {
+	DEBATE_ROLES,
+	type RoleDefinition,
+} from "@/lib/debate/role-definitions";
+import { runDebate } from "@/lib/debate/runner";
+import type {
+	DebateContext,
+	DebateModeDefinition,
+	Message,
+	Role,
+} from "@/lib/debate/types";
 import { useRef, useState } from "react";
 
-type Message = {
-	id: string;
-	role: "user" | "assistant";
-	content: string;
-	roleName?: string; // 表示用のロール名
-};
-
-type ChatMessage = {
-	role: "user" | "assistant";
-	content: string;
-};
-
-// 議論モード
 type DebateMode = "fixed" | "loop" | "consensus" | "multifaceted";
 
-// システムプロンプト定義
-const SYSTEM_PROMPTS = {
-	facilitator:
-		"あなたは議論のファシリテーターです。与えられた議題について簡潔に論点を整理してください。",
-	positive: `あなたは討論に参加するAIアシスタントです。
-役割: 相手の意見を肯定しつつ、議論を深める建設的な参加者です。
-相手の発言を簡潔に要約し、同意する理由を説明し、新しい視点を追加してください。`,
-	negative: `あなたは討論に参加するAIアシスタントです。
-役割: 相手の意見に対して批判的思考を示し、異なる立場から建設的に反論を行います。
-相手の発言を要約し、問題点を指摘し、別の観点を示してください。`,
-	consensus: `あなたは討論に参加するAIアシスタントです。
-これまでの議論を踏まえて、合意点と残る対立点を整理してください。
-もし十分な合意が得られたと判断した場合は、応答の最後に「[合意達成]」と記載してください。
-まだ議論が必要な場合は、次に議論すべきポイントを提示してください。`,
-	critical: `あなたは討論に参加するAIアシスタントです。
-役割: 批判的思考者 (Critical Thinker)。
-提示された意見の前提条件を疑い、論理的な飛躍やバイアスがないか厳しくチェックしてください。
-「なぜそう言えるのか？」「隠れた前提は何か？」を問いかけ、議論の足場を固めてください。`,
-	creative: `あなたは討論に参加するAIアシスタントです。
-役割: 創造的思考者 (Creative Thinker)。
-既存の枠組みにとらわれない代替案や、全く新しい視点を提示してください。
-「もし全く別の方法があるとしたら？」「逆の視点から見ると？」といった問いかけで議論を広げてください。`,
-	mediator: `あなたは討論に参加するAIアシスタントです。
-役割: 調停者 (Mediator)。
-対立する意見の共通点を見出し、建設的な妥協点や統合案を探ってください。
-AとBの意見をどのように両立させるか、あるいはより高い次元で統合できるかを提案してください。`,
-};
-
-// ロール定義
-type RoleDefinition = {
-	key: string;
-	name: string;
-	prompt: string;
-};
-
-const DEBATE_ROLES: Record<string, RoleDefinition> = {
-	facilitator: {
-		key: "facilitator",
-		name: "ファシリテーター",
-		prompt: SYSTEM_PROMPTS.facilitator,
-	},
-	positive: {
-		key: "positive",
-		name: "肯定派",
-		prompt: SYSTEM_PROMPTS.positive,
-	},
-	negative: {
-		key: "negative",
-		name: "否定派",
-		prompt: SYSTEM_PROMPTS.negative,
-	},
-	consensus: {
-		key: "consensus",
-		name: "合意確認",
-		prompt: SYSTEM_PROMPTS.consensus,
-	},
-	critical: {
-		key: "critical",
-		name: "批判的思考者",
-		prompt: SYSTEM_PROMPTS.critical,
-	},
-	creative: {
-		key: "creative",
-		name: "創造的思考者",
-		prompt: SYSTEM_PROMPTS.creative,
-	},
-	mediator: {
-		key: "mediator",
-		name: "調停者",
-		prompt: SYSTEM_PROMPTS.mediator,
-	},
-} as const;
-
-/**
- * 最低待機時間を保証するsleep関数
- */
+// 最低待機時間を保証するsleep関数
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/**
- * APIを呼び出す関数（最低待機時間付き）
- */
-async function callAPIWithMinInterval(
-	messageHistory: ChatMessage[],
-	systemPrompt: string,
-	minIntervalMs = 0,
-): Promise<string> {
-	const startTime = Date.now();
-
-	const response = await fetch("/api/chat", {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({
-			messages: messageHistory,
-			systemPrompt,
-		}),
-	});
-
-	const data = await response.json();
-
-	if (!response.ok) {
-		throw new Error(data.error || "APIエラー");
-	}
-
-	const elapsedTime = Date.now() - startTime;
-	const remainingTime = minIntervalMs - elapsedTime;
-
-	if (remainingTime > 0) {
-		console.log(`⏳ 残り ${remainingTime}ms 待機中...`);
-		await sleep(remainingTime);
-	}
-
-	console.log(`✅ API呼び出し完了 (実行時間: ${Date.now() - startTime}ms)`);
-	return data.content;
-}
 
 export default function Home() {
 	const [topic, setTopic] = useState("");
 	const [messages, setMessages] = useState<Message[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const [currentRole, setCurrentRole] = useState<string>("");
+	const [currentStatus, setCurrentStatus] = useState<string>("");
 	const [minInterval, setMinInterval] = useState(5);
 
 	// モード関連
@@ -155,282 +46,6 @@ export default function Home() {
 	const stopRef = useRef(false);
 
 	/**
-	 * メッセージを追加するヘルパー関数
-	 */
-	const addMessage = (
-		chatHistory: ChatMessage[],
-		content: string,
-		roleName: string,
-		roleKey: string,
-		fullHistory: Message[], // 追加: 保存用の完全な履歴配列
-	) => {
-		const aiMessage: Message = {
-			id: `ai-${roleKey}-${Date.now()}-${Math.random()}`,
-			role: "assistant",
-			content,
-			roleName,
-		};
-		setMessages((prev) => [...prev, aiMessage]);
-		chatHistory.push({ role: "assistant", content });
-		fullHistory.push(aiMessage); // 追加
-	};
-
-	/**
-	 * モード1: 回数指定モード
-	 * - 指定した回数だけロールを順番に実行
-	 */
-	const runFixedMode = async (
-		chatHistory: ChatMessage[],
-		fullHistory: Message[],
-		intervalMs: number,
-	) => {
-		const roles = [
-			DEBATE_ROLES.facilitator,
-			DEBATE_ROLES.positive,
-			DEBATE_ROLES.negative,
-		];
-
-		for (let i = 0; i < turnCount; i++) {
-			if (stopRef.current) break;
-
-			const role = roles[i % roles.length];
-			setCurrentRole(`${role.name} (${i + 1}/${turnCount})`);
-			console.log(
-				`=== ${role.name} のリクエスト開始 (${i + 1}/${turnCount}) ===`,
-			);
-
-			const response = await callAPIWithMinInterval(
-				chatHistory,
-				role.prompt,
-				intervalMs,
-			);
-
-			if (stopRef.current) break;
-			addMessage(
-				chatHistory,
-				response,
-				`${role.name} [T${i + 1}]`,
-				role.key,
-				fullHistory,
-			);
-		}
-	};
-
-	/**
-	 * モード2: ループモード
-	 * - 肯定派 → 否定派 を指定回数繰り返す
-	 */
-	const runLoopMode = async (
-		chatHistory: ChatMessage[],
-		fullHistory: Message[],
-		intervalMs: number,
-	) => {
-		// 最初にファシリテーター
-		if (!stopRef.current) {
-			setCurrentRole("ファシリテーター (開始)");
-			const facilitatorResponse = await callAPIWithMinInterval(
-				chatHistory,
-				DEBATE_ROLES.facilitator.prompt,
-				intervalMs,
-			);
-			if (!stopRef.current) {
-				addMessage(
-					chatHistory,
-					facilitatorResponse,
-					"ファシリテーター",
-					"facilitator",
-					fullHistory,
-				);
-			}
-		}
-
-		// 肯定派 → 否定派 をループ
-		for (let i = 0; i < loopCount; i++) {
-			if (stopRef.current) break;
-
-			// 肯定派
-			setCurrentRole(`肯定派 (ラウンド ${i + 1}/${loopCount})`);
-			const positiveResponse = await callAPIWithMinInterval(
-				chatHistory,
-				DEBATE_ROLES.positive.prompt,
-				intervalMs,
-			);
-			if (stopRef.current) break;
-			addMessage(
-				chatHistory,
-				positiveResponse,
-				`肯定派 [R${i + 1}]`,
-				"positive",
-				fullHistory,
-			);
-
-			// 否定派
-			setCurrentRole(`否定派 (ラウンド ${i + 1}/${loopCount})`);
-			const negativeResponse = await callAPIWithMinInterval(
-				chatHistory,
-				DEBATE_ROLES.negative.prompt,
-				intervalMs,
-			);
-			if (stopRef.current) break;
-			addMessage(
-				chatHistory,
-				negativeResponse,
-				`否定派 [R${i + 1}]`,
-				"negative",
-				fullHistory,
-			);
-		}
-	};
-
-	/**
-	 * モード3: 合意達成モード
-	 * - 肯定派 → 否定派 → 合意確認 を繰り返す
-	 * - 合意確認が「[合意達成]」を含むまで継続（最大10ラウンド）
-	 */
-	const runConsensusMode = async (
-		chatHistory: ChatMessage[],
-		fullHistory: Message[],
-		intervalMs: number,
-	) => {
-		const maxRounds = 10;
-
-		// 最初にファシリテーター
-		if (!stopRef.current) {
-			setCurrentRole("ファシリテーター (開始)");
-			const facilitatorResponse = await callAPIWithMinInterval(
-				chatHistory,
-				DEBATE_ROLES.facilitator.prompt,
-				intervalMs,
-			);
-			if (!stopRef.current) {
-				addMessage(
-					chatHistory,
-					facilitatorResponse,
-					"ファシリテーター",
-					"facilitator",
-					fullHistory,
-				);
-			}
-		}
-
-		for (let round = 1; round <= maxRounds; round++) {
-			if (stopRef.current) break;
-
-			// 肯定派
-			setCurrentRole(`肯定派 (ラウンド ${round})`);
-			const positiveResponse = await callAPIWithMinInterval(
-				chatHistory,
-				DEBATE_ROLES.positive.prompt,
-				intervalMs,
-			);
-			if (stopRef.current) break;
-			addMessage(
-				chatHistory,
-				positiveResponse,
-				`肯定派 [R${round}]`,
-				"positive",
-				fullHistory,
-			);
-
-			// 否定派
-			setCurrentRole(`否定派 (ラウンド ${round})`);
-			const negativeResponse = await callAPIWithMinInterval(
-				chatHistory,
-				DEBATE_ROLES.negative.prompt,
-				intervalMs,
-			);
-			if (stopRef.current) break;
-			addMessage(
-				chatHistory,
-				negativeResponse,
-				`否定派 [R${round}]`,
-				"negative",
-				fullHistory,
-			);
-
-			// 合意確認
-			setCurrentRole(`合意確認 (ラウンド ${round})`);
-			const consensusResponse = await callAPIWithMinInterval(
-				chatHistory,
-				DEBATE_ROLES.consensus.prompt,
-				intervalMs,
-			);
-			if (stopRef.current) break;
-			addMessage(
-				chatHistory,
-				consensusResponse,
-				`合意確認 [R${round}]`,
-				"consensus",
-				fullHistory,
-			);
-
-			// 合意達成チェック
-			if (consensusResponse.includes("[合意達成]")) {
-				console.log("🎉 合意に達しました！");
-				break;
-			}
-
-			if (round === maxRounds) {
-				console.log("⚠️ 最大ラウンド数に達しました");
-			}
-		}
-	};
-
-	/**
-	 * モード4: 多面的議論モード
-	 * - 選択されたロールを順番に実行する
-	 */
-	const runMultifacetedMode = async (
-		chatHistory: ChatMessage[],
-		fullHistory: Message[],
-		intervalMs: number,
-	) => {
-		// 最初にファシリテーター
-		if (!stopRef.current) {
-			setCurrentRole("ファシリテーター (開始)");
-			const facilitatorResponse = await callAPIWithMinInterval(
-				chatHistory,
-				DEBATE_ROLES.facilitator.prompt,
-				intervalMs,
-			);
-			if (!stopRef.current) {
-				addMessage(
-					chatHistory,
-					facilitatorResponse,
-					"ファシリテーター",
-					"facilitator",
-					fullHistory,
-				);
-			}
-		}
-
-		// 指定回数ループ
-		for (let i = 0; i < loopCount; i++) {
-			if (stopRef.current) break;
-
-			for (const role of selectedRoles) {
-				if (stopRef.current) break;
-
-				setCurrentRole(`${role.name} (ラウンド ${i + 1}/${loopCount})`);
-				const response = await callAPIWithMinInterval(
-					chatHistory,
-					role.prompt,
-					intervalMs,
-				);
-
-				if (stopRef.current) break;
-				addMessage(
-					chatHistory,
-					response,
-					`${role.name} [R${i + 1}]`,
-					role.key,
-					fullHistory,
-				);
-			}
-		}
-	};
-
-	/**
 	 * 議論を開始
 	 */
 	const handleStartDebate = async () => {
@@ -442,94 +57,169 @@ export default function Home() {
 		setIsLoading(true);
 		setError(null);
 		setMessages([]);
+		setCurrentStatus("準備中...");
 		stopRef.current = false;
 
-		const chatHistory: ChatMessage[] = [];
-		const fullHistory: Message[] = []; // 保存用
-
 		try {
-			// ユーザーメッセージを追加
-			const userMessage: Message = {
+			// 初期コンテキストの作成
+			const initialUserMessage: Message = {
 				id: `user-${Date.now()}`,
 				role: "user",
-				content: topic,
 				roleName: "ユーザー",
+				content: topic,
+				timestamp: Date.now(),
 			};
-			setMessages([userMessage]);
-			chatHistory.push({ role: "user", content: topic });
-			fullHistory.push(userMessage);
 
-			const intervalMs = minInterval * 1000;
+			// UIの初期化
+			setMessages([initialUserMessage]);
+			const runningMessages = [initialUserMessage]; // 実行中の履歴保持用
 
-			// モードに応じて実行
+			const initialContext: DebateContext = {
+				topic,
+				messages: [initialUserMessage],
+				currentRound: 0,
+			};
+
+			// モード定義の作成
+			let modeDef: DebateModeDefinition;
 			switch (debateMode) {
 				case "fixed":
-					await runFixedMode(chatHistory, fullHistory, intervalMs);
+					modeDef = createFixedMode(
+						["facilitator", "positive", "negative"],
+						turnCount,
+					);
 					break;
 				case "loop":
-					await runLoopMode(chatHistory, fullHistory, intervalMs);
+					modeDef = createLoopMode(loopCount);
 					break;
 				case "consensus":
-					await runConsensusMode(chatHistory, fullHistory, intervalMs);
+					modeDef = createConsensusMode(10);
 					break;
 				case "multifaceted":
-					await runMultifacetedMode(chatHistory, fullHistory, intervalMs);
+					modeDef = createMultifacetedMode(
+						selectedRoles.map((r) => r.key) as Exclude<Role, "user">[],
+						loopCount,
+					);
 					break;
+				default:
+					// 決して到達しないはずだが、デフォルトを設定
+					modeDef = createFixedMode(
+						["facilitator", "positive", "negative"],
+						turnCount,
+					);
 			}
 
-			console.log("=== 議論完了 ===");
+			// 議論ランナーの初期化
+			const generator = runDebate(initialContext, modeDef, {
+				generateResponse: async (prompt, context) => {
+					if (stopRef.current) throw new Error("Stop requested");
 
-			// 議論終了時にログを保存
-			if (!stopRef.current) {
-				try {
-					setCurrentRole("ログ保存中...");
-
-					// 1. Slug生成
-					const slugRes = await fetch("/api/slug", {
-						method: "POST",
-						headers: { "Content-Type": "application/json" },
-						body: JSON.stringify({ topic }),
-					});
-					const { slug } = await slugRes.json();
-
-					// 2. ログ保存
-					const logData = {
-						topic,
-						startTime: new Date().toISOString(), // 簡易的に現在時刻（本来は開始時刻を保持すべき）
-						mode: debateMode,
-						settings: {
-							turnCount: debateMode === "fixed" ? turnCount : undefined,
-							loopCount: debateMode !== "fixed" ? loopCount : undefined,
-							selectedRoles:
-								debateMode === "multifaceted"
-									? selectedRoles.map((r) => r.key)
-									: undefined,
-							minInterval,
-						},
-						messages: fullHistory,
-					};
-
-					const saveRes = await fetch("/api/council-logs", {
-						method: "POST",
-						headers: { "Content-Type": "application/json" },
-						body: JSON.stringify({ ...logData, slug }),
-					});
-
-					if (saveRes.ok) {
-						console.log("✅ ログ保存完了");
-					} else {
-						alert("ログ保存失敗");
+					const startTime = Date.now();
+					let result = "";
+					try {
+						// API呼び出し
+						result = await callChatApi(context.messages, prompt);
+					} catch (e) {
+						console.error("API Call failed", e);
+						throw e;
 					}
-				} catch (saveErr) {
-					alert(`ログ保存エラー: ${saveErr}`);
+
+					// 最低待機時間の確保
+					const elapsed = Date.now() - startTime;
+					const waitTime = minInterval * 1000 - elapsed;
+					if (waitTime > 0 && !stopRef.current) {
+						await sleep(waitTime);
+					}
+
+					if (stopRef.current) throw new Error("Stop requested");
+					return result;
+				},
+			});
+
+			// ランナーの実行ループ
+			for await (const yieldData of generator) {
+				if (stopRef.current) break;
+
+				if (yieldData.type === "status") {
+					setCurrentStatus(
+						`${yieldData.role ? DEBATE_ROLES[yieldData.role as keyof typeof DEBATE_ROLES]?.name || yieldData.role : ""} が思考中...`,
+					);
+				} else if (yieldData.type === "message") {
+					setMessages((prev) => [...prev, yieldData.message]);
+					runningMessages.push(yieldData.message);
+				} else if (yieldData.type === "finish") {
+					console.log("Debate finished:", yieldData.reason);
 				}
 			}
-		} catch (err) {
-			console.error("Error:", err);
-			setError(String(err));
+
+			// 議論終了後の処理（ログ保存など）
+			if (!stopRef.current) {
+				await saveLogs(topic, debateMode, runningMessages);
+			}
+		} catch (err: unknown) {
+			if (err instanceof Error && err.message === "Stop requested") {
+				console.log("Debate stopped by user");
+			} else {
+				console.error("Error:", err);
+				setError(String(err));
+			}
 		} finally {
 			setIsLoading(false);
-			setCurrentRole("");
+			setCurrentStatus("");
+		}
+	};
+
+	/**
+	 * ログ保存処理
+	 */
+	const saveLogs = async (
+		topic: string,
+		mode: DebateMode,
+		messages: Message[],
+	) => {
+		try {
+			setCurrentStatus("ログ保存中...");
+
+			// Settings object for logs
+			const settings = {
+				turnCount: mode === "fixed" ? turnCount : undefined,
+				loopCount: mode !== "fixed" ? loopCount : undefined,
+				selectedRoles:
+					mode === "multifaceted" ? selectedRoles.map((r) => r.key) : undefined,
+				minInterval,
+			};
+
+			// 1. Slug生成
+			const slugRes = await fetch("/api/slug", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ topic }),
+			});
+			const { slug } = await slugRes.json();
+
+			// 2. ログ保存
+			const logData = {
+				topic,
+				startTime: new Date().toISOString(),
+				mode,
+				settings,
+				messages,
+			};
+
+			const saveRes = await fetch("/api/council-logs", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ ...logData, slug }),
+			});
+
+			if (saveRes.ok) {
+				console.log("✅ ログ保存完了");
+			} else {
+				alert("ログ保存失敗");
+			}
+		} catch (saveErr) {
+			console.error(saveErr);
+			alert(`ログ保存エラー: ${saveErr}`);
 		}
 	};
 
@@ -538,7 +228,7 @@ export default function Home() {
 	 */
 	const handleStopDebate = () => {
 		stopRef.current = true;
-		setCurrentRole("停止中...");
+		setCurrentStatus("停止中...");
 	};
 
 	return (
@@ -718,7 +408,7 @@ export default function Home() {
 							disabled={isLoading}
 							className="bg-blue-500 text-white px-4 py-2 rounded-lg disabled:bg-gray-300"
 						>
-							{isLoading ? `処理中... (${currentRole})` : "議論開始"}
+							{isLoading ? `処理中... (${currentStatus})` : "議論開始"}
 						</button>
 						{isLoading && (
 							<button
@@ -743,28 +433,21 @@ export default function Home() {
 				<div className="bg-white p-4 rounded-lg shadow">
 					<h2 className="font-bold mb-4">メッセージ ({messages.length}件)</h2>
 					{messages.map((msg) => (
-						<div
+						<MessageComponent
 							key={msg.id}
-							className={`p-3 mb-2 rounded-lg ${
-								msg.role === "user" ? "bg-blue-100" : "bg-green-100"
-							}`}
-						>
-							<div className="text-xs text-gray-500 mb-1">
-								{msg.roleName || (msg.role === "user" ? "ユーザー" : "AI")}
-							</div>
-							{msg.role === "user" ? (
-								<div className="whitespace-pre-wrap">{msg.content}</div>
-							) : (
-								<MarkdownPreview content={msg.content} />
-							)}
-						</div>
+							id={msg.id}
+							role={msg.role}
+							content={msg.content}
+							roleName={msg.roleName}
+							createdAt={msg.timestamp}
+						/>
 					))}
 					{messages.length === 0 && (
 						<p className="text-gray-500">メッセージがありません</p>
 					)}
 					{isLoading && (
 						<div className="text-blue-500 animate-pulse">
-							{currentRole ? `${currentRole} が応答中...` : "処理中..."}
+							{currentStatus ? currentStatus : "処理中..."}
 						</div>
 					)}
 				</div>

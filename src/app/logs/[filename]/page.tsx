@@ -1,6 +1,6 @@
 "use client";
 
-import { MarkdownPreview } from "@/components/MarkdownPreview";
+import MessageComponent from "@/components/Message";
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
 
@@ -9,6 +9,7 @@ type Message = {
 	role: "user" | "assistant";
 	content: string;
 	roleName?: string;
+	timestamp?: number;
 };
 
 type CouncilLog = {
@@ -97,21 +98,14 @@ export default function LogDetailPage({
 
 				<div className="bg-white p-4 rounded-lg shadow">
 					{log.messages.map((msg) => (
-						<div
+						<MessageComponent
 							key={msg.id}
-							className={`p-3 mb-2 rounded-lg ${
-								msg.role === "user" ? "bg-blue-100" : "bg-green-100"
-							}`}
-						>
-							<div className="text-xs text-gray-500 mb-1">
-								{msg.roleName || (msg.role === "user" ? "ユーザー" : "AI")}
-							</div>
-							{msg.role === "user" ? (
-								<div className="whitespace-pre-wrap">{msg.content}</div>
-							) : (
-								<MarkdownPreview content={msg.content} />
-							)}
-						</div>
+							id={msg.id}
+							role={msg.role}
+							content={msg.content}
+							roleName={msg.roleName}
+							createdAt={msg.timestamp}
+						/>
 					))}
 				</div>
 			</div>
