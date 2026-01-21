@@ -12,7 +12,8 @@
 - **ファイル名**: `YYYYMMDDHHmmss_{english-slug}.json`
   - 例: `20251001120000_ai-ethics-debate.json`
   - `english-slug`: 議題（日本語）を英語小文字のケバブケース（ハイフンつなぎ）に変換したもの。
-- **保存先**: `docs/council-logs/`
+- **保存先**: `public/council-logs/`
+- **Git管理**: すべてのログファイルおよび `index.json` はGit管理対象とする
 
 ### 2.2. スキーマ定義 (`CouncilLog`)
 
@@ -61,7 +62,8 @@ interface CouncilLog {
    - 例: "AIの権利について" -> "ai-rights"
 3. **データ構築**: 現在のState (`messages`, `mode`, `settings` 等) から `CouncilLog` オブジェクトを生成。
 4. **API送信**: `POST /api/council-logs` にJSONデータを送信。
-5. **ファイル書き込み**: サーバーサイドで `docs/council-logs/` ディレクトリにファイルを保存。
+5. **ファイル書き込み**: サーバーサイドで `public/council-logs/` ディレクトリにファイルを保存。
+6. **インデックス更新**: 同じAPIリクエスト内で `public/council-logs/index.json` を更新し、新しいファイルをファイルリストに追加する。
 
 ### 3.3. API設計 (Export)
 - **Endpoint**: `POST /api/council-logs`
@@ -69,6 +71,10 @@ interface CouncilLog {
 - **Response**:
   - Success: `{ success: true, filename: "..." }`
   - Error: `{ success: false, error: "..." }`
+- **処理内容**:
+  1. `public/council-logs/{filename}.json` にログファイルを保存
+  2. `public/council-logs/index.json` を読み込み、新しいファイル名を追加して更新
+  3. `index.json` のフォーマット: `string[]` (ファイル名の配列、日付降順でソート)
 
 ## 4. インポート機能 (閲覧/プレビュー)
 
@@ -93,11 +99,28 @@ interface CouncilLog {
 ## 5. 実装ステップ
 
 1. **API実装**:
-   - `src/app/api/council-logs/route.ts` (POST/GET) - 実装済み
-   - `src/app/api/council-logs/[filename]/route.ts` (GET) - 新規作成
+   - `src/app/api/council-logs/route.ts` (POST/GET) - 実装済み（保存先を `public/council-logs/` に変更、`index.json` 更新処理を追加）
+   - `src/app/api/council-logs/[filename]/route.ts` (GET) - 実装済み（参照先を `public/council-logs/` に変更）
 2. **Slug生成ロジック**: 実装済み
 3. **クライアント実装 (保存)**: 実装済み
 4. **閲覧ページ実装**:
-   - `src/app/logs/page.tsx` (一覧)
-   - `src/app/logs/[filename]/page.tsx` (詳細)
-   - 共通コンポーネントの切り出し (必要に応じて `src/app/page.tsx` から抽出)
+   - `src/app/logs/page.tsx` (一覧) - 実装済み
+   - `src/app/logs/[filename]/page.tsx` (詳細) - 実装済み
+5. **ビルドスクリプト**:
+   - `scripts/prepare-logs.mjs` - 削除または簡素化（コピー処理が不要になったため）
+   - `package.json` - `prepare-logs` の実行タイミングを調整または削除
+
+## 6. 変更履歴
+
+### 2026年1月21日: 保存先を public に統一
+- **背景**: 当初は `docs/council-logs/` に保存し、ビルド時に `public/council-logs/` へコピーする設計だったが、二重管理を避けるため直接 `public/council-logs/` へ保存する方式に変更。
+- **変更内容**:
+  - 保存先を `docs/council-logs/` から `public/council-logs/` に変更
+  - POST API内で `index.json` を自動生成・更新する処理を追加
+  - すべてのログファイルおよび `index.json` をGit管理対象とする
+  - `scripts/prepare-logs.mjs` のコピー処理が不要になった（削除または役割変更を検討）
+- **利点**:
+  - ファイルの二重管理が不要
+  - 開発時の同期処理が不要
+  - 実装がシンプルになる
+  - すべての実験結果をGit履歴として保持できる
