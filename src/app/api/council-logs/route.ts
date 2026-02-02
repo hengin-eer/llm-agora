@@ -4,7 +4,8 @@ import path from "node:path";
 import { uuidv7 } from "uuidv7";
 
 // ログ保存ディレクトリ
-const LOG_DIR = path.join(process.cwd(), "docs", "council-logs");
+const LOG_DIR = path.join(process.cwd(), "public", "council-logs");
+const INDEX_FILE = path.join(LOG_DIR, "index.json");
 
 // ディレクトリが存在しない場合は作成するヘルパー関数
 async function ensureLogDir() {
@@ -13,6 +14,32 @@ async function ensureLogDir() {
 	} catch {
 		await fs.mkdir(LOG_DIR, { recursive: true });
 	}
+}
+
+// index.jsonを更新するヘルパー関数
+async function updateIndexJson(newFilename: string) {
+	let files: string[] = [];
+
+	// 既存のindex.jsonを読み込み
+	try {
+		const indexContent = await fs.readFile(INDEX_FILE, "utf-8");
+		const indexData = JSON.parse(indexContent);
+		files = Array.isArray(indexData.files) ? indexData.files : [];
+	} catch {
+		// index.jsonが存在しない場合は空配列から開始
+		files = [];
+	}
+
+	// 新しいファイルを追加（重複を避ける）
+	if (!files.includes(newFilename)) {
+		files.push(newFilename);
+	}
+
+	// 日付降順でソート
+	files.sort().reverse();
+
+	// index.jsonを書き込み
+	await fs.writeFile(INDEX_FILE, JSON.stringify({ files }, null, 2), "utf-8");
 }
 
 // GET: ログファイル一覧の取得
@@ -66,6 +93,9 @@ export async function POST(req: Request) {
 
 		await ensureLogDir();
 		await fs.writeFile(filePath, JSON.stringify(logData, null, 2), "utf-8");
+
+		// index.jsonを更新
+		await updateIndexJson(filename);
 
 		return NextResponse.json({ success: true, filename });
 	} catch (error) {

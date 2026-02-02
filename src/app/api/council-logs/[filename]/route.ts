@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 // ログ保存ディレクトリ
-const LOG_DIR = path.join(process.cwd(), "docs", "council-logs");
+const LOG_DIR = path.join(process.cwd(), "public", "council-logs");
 
 export async function GET(
 	_req: Request,

@@ -1,14 +1,13 @@
 {
   "name": "llm-agora",
-  "version": "0.1.0",
+  "version": "1.1.0",
   "private": true,
   "scripts": {
-    "dev": "node scripts/prepare-logs.mjs && next dev --turbopack",
-    "build": "node scripts/prepare-logs.mjs && next build",
+    "dev": "next dev --turbopack",
+    "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "format": "npx @biomejs/biome check --write",
-    "prepare-logs": "node scripts/prepare-logs.mjs"
+    "format": "npx @biomejs/biome check --write"
   },
   "dependencies": {
     "@ai-sdk/google": "^1.2.11",
